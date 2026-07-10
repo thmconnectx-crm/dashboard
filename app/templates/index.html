@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ app_name }}</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="/static/app.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js" defer></script>
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand-block">
+          <div class="brand-mark"><i data-lucide="chart-no-axes-combined"></i></div>
+          <div>
+            <p class="eyebrow">Central local de midia paga</p>
+            <h1>Paid Traffic Dashboard</h1>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <div class="connection-strip" id="connectionStrip"></div>
+          <div class="range-chip"><i data-lucide="calendar-days"></i><span id="topRangeLabel">Carregando periodo</span></div>
+        </div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar" aria-label="Filtros">
+        <div class="sidebar-head">
+          <div>
+            <p class="eyebrow dark">Controles</p>
+            <h2>Filtros do relatorio</h2>
+          </div>
+          <i data-lucide="sliders-horizontal"></i>
+        </div>
+
+        <div class="filter-grid">
+          <section class="control-group period-control">
+            <label for="period">Periodo</label>
+            <select id="period">
+              <option value="last_7">Ultimos 7 dias</option>
+              <option value="last_30" selected>Ultimos 30 dias</option>
+              <option value="last_90">Ultimos 90 dias</option>
+              <option value="month_to_date">Mes atual</option>
+              <option value="custom">Personalizado</option>
+            </select>
+          </section>
+
+          <div class="date-grid" id="customDates" hidden>
+            <section class="control-group">
+              <label for="startDate">Inicio</label>
+              <input type="date" id="startDate" />
+            </section>
+            <section class="control-group">
+              <label for="endDate">Fim</label>
+              <input type="date" id="endDate" />
+            </section>
+          </div>
+
+          <section class="control-group platform-control">
+            <label>Plataformas</label>
+            <label class="check-card google"><input type="checkbox" name="platform" value="google" checked /><span>Google Ads</span></label>
+            <label class="check-card meta"><input type="checkbox" name="platform" value="meta" checked /><span>Meta Ads</span></label>
+          </section>
+
+          <section class="control-group">
+            <label for="accountSelect">Conta</label>
+            <select id="accountSelect">
+              <option value="">Todas</option>
+            </select>
+          </section>
+
+          <section class="control-group">
+            <label for="campaignSelect">Campanha</label>
+            <select id="campaignSelect">
+              <option value="">Todas</option>
+            </select>
+          </section>
+        </div>
+
+        <div class="button-stack">
+          <button id="refreshAccounts" type="button"><i data-lucide="refresh-cw"></i><span>Atualizar contas</span></button>
+          <button id="syncData" type="button" class="primary"><i data-lucide="download-cloud"></i><span>Sincronizar dados</span></button>
+        </div>
+
+        <div class="sidebar-note">
+          <i data-lucide="database"></i>
+          <span>Os dados sincronizados ficam salvos no SQLite local.</span>
+        </div>
+
+        <div class="sync-status" id="syncStatus">
+          <span>Ultima sincronizacao</span>
+          <strong>Nenhum registro ainda</strong>
+        </div>
+
+        <div class="export-row">
+          <a id="exportPdf" class="tool-button" href="#"><i data-lucide="file-text"></i><span>PDF</span></a>
+          <a id="exportXlsx" class="tool-button" href="#"><i data-lucide="table"></i><span>Excel</span></a>
+        </div>
+      </aside>
+
+      <section class="content">
+        <div class="metric-grid" id="metricGrid"></div>
+
+        <section class="summary-band">
+          <div class="summary-copy">
+            <p class="eyebrow dark">Comparativo</p>
+            <h2>Performance consolidada por plataforma</h2>
+          </div>
+          <div class="summary-ledger" id="summaryLedger"></div>
+        </section>
+
+        <section class="chart-band">
+          <div class="chart-panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow dark">Distribuicao</p>
+                <h2>Investimento por plataforma</h2>
+              </div>
+              <span class="panel-badge">Spend</span>
+            </div>
+            <canvas id="spendChart" height="120"></canvas>
+          </div>
+          <div class="chart-panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow dark">Evolucao</p>
+                <h2>Cliques e conversoes</h2>
+              </div>
+              <span class="panel-badge accent">Diario</span>
+            </div>
+            <canvas id="dailyChart" height="120"></canvas>
+          </div>
+        </section>
+
+        <section class="chart-panel wide-chart">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow dark">Plataformas</p>
+              <h2>Investimento e conversoes por dia</h2>
+            </div>
+            <span class="panel-badge">Spend + Conv.</span>
+          </div>
+          <canvas id="platformTrendChart" height="120"></canvas>
+        </section>
+
+        <section class="table-section">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow dark">Base historica</p>
+              <h2>Historico consolidado</h2>
+            </div>
+            <span id="rangeLabel"></span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Plataforma</th>
+                  <th>Campanha</th>
+                  <th>Impressoes</th>
+                  <th>Cliques</th>
+                  <th>CTR</th>
+                  <th>CPC</th>
+                  <th>Investimento</th>
+                  <th>Conv.</th>
+                  <th>CPA</th>
+                  <th>ROAS</th>
+                </tr>
+              </thead>
+              <tbody id="metricsTable"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

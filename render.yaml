@@ -1,0 +1,56 @@
+services:
+  - type: web
+    name: paid-traffic-dashboard
+    runtime: docker
+    plan: starter
+    autoDeploy: false
+    healthCheckPath: /health
+    disk:
+      name: paid-traffic-data
+      mountPath: /app/data
+      sizeGB: 1
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        value: sqlite:////app/data/traffic_reports.sqlite3
+      - key: APP_NAME
+        value: Paid Traffic Dashboard
+      - key: BASE_URL
+        sync: false
+      - key: TRUSTED_HOSTS
+        sync: false
+      - key: APP_SECRET_KEY
+        generateValue: true
+      - key: AUTO_SYNC_ENABLED
+        value: "false"
+      - key: AUTO_SYNC_TIME
+        value: "03:00"
+      - key: AUTO_SYNC_PERIOD_DAYS
+        value: "1"
+      - key: AUTO_SYNC_PLATFORMS
+        value: google,meta
+      - key: GOOGLE_ADS_CLIENT_ID
+        sync: false
+      - key: GOOGLE_ADS_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_ADS_DEVELOPER_TOKEN
+        sync: false
+      - key: GOOGLE_ADS_LOGIN_CUSTOMER_ID
+        sync: false
+      - key: GOOGLE_ADS_API_VERSION
+        value: v24
+      - key: GOOGLE_ADS_REFRESH_TOKEN
+        sync: false
+      - key: GOOGLE_ADS_CUSTOMER_IDS
+        sync: false
+      - key: META_APP_ID
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: META_GRAPH_API_VERSION
+        value: v25.0
+      - key: META_ACCESS_TOKEN
+        sync: false
+      - key: META_AD_ACCOUNT_IDS
+        sync: false
