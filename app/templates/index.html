@@ -4,6 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ app_name }}</title>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+    <link rel="preconnect" href="https://unpkg.com" />
     <link rel="stylesheet" href="/static/styles.css" />
     <script src="/static/app.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js" defer></script>
@@ -15,13 +17,17 @@
         <div class="brand-block">
           <div class="brand-mark"><i data-lucide="chart-no-axes-combined"></i></div>
           <div>
-            <p class="eyebrow">Central local de midia paga</p>
+            <p class="eyebrow">Command center de midia paga</p>
             <h1>Paid Traffic Dashboard</h1>
+            <p class="brand-subtitle">Google Ads e Meta Ads em uma visao executiva, pronta para relatorios.</p>
           </div>
         </div>
         <div class="topbar-actions">
           <div class="connection-strip" id="connectionStrip"></div>
-          <div class="range-chip"><i data-lucide="calendar-days"></i><span id="topRangeLabel">Carregando periodo</span></div>
+          <div class="topbar-meta">
+            <div class="range-chip"><i data-lucide="calendar-days"></i><span id="topRangeLabel">Carregando periodo</span></div>
+            <div class="range-chip muted-chip"><i data-lucide="shield-check"></i><span>Dados protegidos</span></div>
+          </div>
         </div>
       </div>
     </header>
@@ -87,7 +93,7 @@
 
         <div class="sidebar-note">
           <i data-lucide="database"></i>
-          <span>Os dados sincronizados ficam salvos no SQLite local.</span>
+          <span>Historico preservado para consultas e exportacoes rapidas.</span>
         </div>
 
         <div class="sync-status" id="syncStatus">
@@ -102,6 +108,17 @@
       </aside>
 
       <section class="content">
+        <section class="overview-header">
+          <div>
+            <p class="eyebrow dark">Painel executivo</p>
+            <h2>Resumo de performance</h2>
+          </div>
+          <div class="overview-actions">
+            <span class="live-dot"></span>
+            <span>Atualizado pelo historico sincronizado</span>
+          </div>
+        </section>
+
         <div class="metric-grid" id="metricGrid"></div>
 
         <section class="summary-band">
@@ -121,7 +138,7 @@
               </div>
               <span class="panel-badge">Spend</span>
             </div>
-            <canvas id="spendChart" height="120"></canvas>
+            <div class="chart-body compact"><canvas id="spendChart"></canvas></div>
           </div>
           <div class="chart-panel">
             <div class="panel-title">
@@ -131,7 +148,7 @@
               </div>
               <span class="panel-badge accent">Diario</span>
             </div>
-            <canvas id="dailyChart" height="120"></canvas>
+            <div class="chart-body compact"><canvas id="dailyChart"></canvas></div>
           </div>
         </section>
 
@@ -143,7 +160,7 @@
             </div>
             <span class="panel-badge">Spend + Conv.</span>
           </div>
-          <canvas id="platformTrendChart" height="120"></canvas>
+          <div class="chart-body tall"><canvas id="platformTrendChart"></canvas></div>
         </section>
 
         <section class="table-section">

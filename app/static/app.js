@@ -219,6 +219,13 @@ function renderSummaryLedger(summary) {
 
 function renderCharts(summary, daily) {
   pendingChartData = { summary, daily };
+  if (!summary.length && !daily.length) {
+    if (spendChart) spendChart.destroy();
+    if (dailyChart) dailyChart.destroy();
+    if (platformTrendChart) platformTrendChart.destroy();
+    renderChartFallback(summary, daily);
+    return;
+  }
   if (!window.Chart) {
     renderChartFallback(summary, daily);
     if (chartRetryCount < 20) {
@@ -252,6 +259,7 @@ function renderCharts(summary, daily) {
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       cutout: "64%",
       plugins: {
         legend: { position: "bottom", labels: { color: "#aeb9c5", usePointStyle: true, boxWidth: 8, padding: 18 } },
@@ -289,6 +297,7 @@ function renderCharts(summary, daily) {
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       interaction: { intersect: false, mode: "index" },
       plugins: { legend: { position: "bottom", labels: { color: "#aeb9c5", usePointStyle: true, boxWidth: 8, padding: 18 } } },
       scales: {
@@ -334,6 +343,7 @@ function renderCharts(summary, daily) {
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       interaction: { intersect: false, mode: "index" },
       plugins: { legend: { position: "bottom", labels: { color: "#aeb9c5", usePointStyle: true, boxWidth: 8, padding: 18 } } },
       scales: {
