@@ -10,6 +10,7 @@ from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas as pdf_canvas
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.models import CampaignMetric
@@ -97,85 +98,347 @@ def build_pdf(
     end_date: date | None = None,
     previous_rows: list[CampaignMetric] | None = None,
 ) -> bytes:
-    output = BytesIO()
-    document = SimpleDocTemplate(
-        output,
-        pagesize=landscape(A4),
-        rightMargin=18 * mm,
-        leftMargin=18 * mm,
-        topMargin=14 * mm,
-        bottomMargin=14 * mm,
-        title="Relatório de Campanhas de Mensagens",
-        author="Paid Traffic Dashboard",
-    )
-    styles = _pdf_styles()
-    story: list = []
     df = rows_to_dataframe(rows)
     period = _period_label(start_date, end_date)
-
-    story.extend(_pdf_header(styles, period))
-
     if df.empty:
-        story.extend(
-            [
-                Spacer(1, 16),
-                Paragraph("Nenhum dado encontrado para os filtros selecionados.", styles["Empty"]),
-                Paragraph(
-                    "Verifique o período, a conta selecionada ou execute uma nova sincronização antes de exportar o relatório.",
-                    styles["BodyMuted"],
-                ),
-            ]
-        )
-        try:
-            document.build(story, onFirstPage=_footer, onLaterPages=_footer)
-            return output.getvalue()
-        except Exception:
-            return _emergency_pdf_bytes(period)
+        return _build_empty_premium_pdf(period)
 
     previous_df = rows_to_dataframe(previous_rows or [])
     campaign_summary = _aggregate(df, ["Plataforma", "Conta", "Modelo da Campanha", "Campanha"]).sort_values(by="Investimento", ascending=False)
     daily_summary = _aggregate(df, ["Data", "Plataforma"]).sort_values(by=["Data", "Plataforma"])
+    return _build_premium_pdf_canvas(df, previous_df, campaign_summary, daily_summary, period)
 
-    story.append(_comparison_cards(df, previous_df, campaign_summary, styles))
-    story.append(Spacer(1, 8))
-    story.append(_campaign_overview(campaign_summary, styles))
-    story.append(Spacer(1, 8))
 
-    story.append(Paragraph("Conversões e ações por tipo", styles["SectionTitle"]))
-    story.append(_actions_table(df, styles))
-    story.append(Spacer(1, 8))
-    story.append(Paragraph("Distribuição por campanha", styles["SectionTitle"]))
-    story.append(_mini_bar_table(campaign_summary.head(8), "Campanha", "Mensagens", "Custo por Mensagem", styles))
-    story.append(Spacer(1, 8))
-    story.append(Paragraph("Alcance e impressões", styles["SectionTitle"]))
-    story.append(_mini_bar_table(campaign_summary.head(8), "Campanha", "Alcance", "Impressões", styles))
-    story.append(Spacer(1, 8))
-    story.append(Paragraph("Evolução diária", styles["SectionTitle"]))
-    story.append(_mini_bar_table(daily_summary.tail(10), "Data", "Mensagens", "Cliques", styles))
-    story.append(Spacer(1, 8))
 
-    story.append(Paragraph("Campanhas em destaque", styles["SectionTitle"]))
-    story.append(_featured_campaigns_table(campaign_summary.head(12), styles))
+def _build_premium_pdf_canvas(
+    df: pd.DataFrame,
+    previous_df: pd.DataFrame,
+    campaign_summary: pd.DataFrame,
+    daily_summary: pd.DataFrame,
+    period: str,
+) -> bytes:
+    output = BytesIO()
+    page_width, page_height = landscape(A4)
+    canvas = pdf_canvas.Canvas(output, pagesize=landscape(A4))
+    canvas.setTitle("Relatório premium de tráfego pago")
+    canvas.setAuthor("Paid Traffic Dashboard")
 
-    try:
-        document.build(story, onFirstPage=_footer, onLaterPages=_footer)
-    except Exception:
-        output = BytesIO()
-        fallback = SimpleDocTemplate(
-            output,
-            pagesize=landscape(A4),
-            rightMargin=18 * mm,
-            leftMargin=18 * mm,
-            topMargin=14 * mm,
-            bottomMargin=14 * mm,
-            title="Relatório de Campanhas de Mensagens",
-            author="Paid Traffic Dashboard",
-        )
-        try:
-            fallback.build(_fallback_pdf_story(df, period, styles), onFirstPage=_footer, onLaterPages=_footer)
-        except Exception:
-            return _emergency_pdf_bytes(period)
+    totals = _totals(df)
+    previous = _totals(previous_df) if not previous_df.empty else {}
+    margin = 22
+    content_width = page_width - (margin * 2)
+
+    _draw_page_background(canvas, page_width, page_height)
+    _draw_canvas_header(canvas, margin, page_height - 92, content_width, 70, period)
+
+    card_y = page_height - 176
+    card_gap = 10
+    card_width = (content_width - card_gap * 3) / 4
+    cards = [
+        ("Valor investido", _money(totals["spend"]), _delta(totals["spend"], previous.get("spend", 0)), _previous_label(previous.get("spend", 0), _money)),
+        ("Mensagens iniciadas", _number(totals["messages"]), _delta(totals["messages"], previous.get("messages", 0)), _previous_label(previous.get("messages", 0), _number)),
+        ("Cliques", _integer(totals["clicks"]), _delta(totals["clicks"], previous.get("clicks", 0)), _previous_label(previous.get("clicks", 0), _integer)),
+        ("Impressões", _integer(totals["impressions"]), _delta(totals["impressions"], previous.get("impressions", 0)), _previous_label(previous.get("impressions", 0), _integer)),
+    ]
+    for index, (label, value, delta, previous_label) in enumerate(cards):
+        _draw_metric_card(canvas, margin + index * (card_width + card_gap), card_y, card_width, 64, label, value, delta, previous_label)
+
+    overview_y = page_height - 266
+    _draw_campaign_overview(canvas, margin, overview_y, content_width, 76, campaign_summary, totals)
+
+    middle_y = page_height - 406
+    left_width = content_width * 0.47
+    right_x = margin + left_width + 14
+    right_width = content_width - left_width - 14
+    _draw_actions_panel(canvas, margin, middle_y, left_width, 122, totals)
+    _draw_daily_panel(canvas, right_x, middle_y, right_width, 122, daily_summary)
+
+    _draw_featured_table(canvas, margin, 48, content_width, 142, campaign_summary.head(8))
+    _draw_canvas_footer(canvas, margin, page_width, period)
+
+    canvas.showPage()
+    canvas.save()
     return output.getvalue()
+
+
+def _build_empty_premium_pdf(period: str) -> bytes:
+    output = BytesIO()
+    page_width, page_height = landscape(A4)
+    canvas = pdf_canvas.Canvas(output, pagesize=landscape(A4))
+    canvas.setTitle("Relatório premium de tráfego pago")
+    margin = 22
+    content_width = page_width - (margin * 2)
+    _draw_page_background(canvas, page_width, page_height)
+    _draw_canvas_header(canvas, margin, page_height - 92, content_width, 70, period)
+    canvas.setFillColor(colors.white)
+    canvas.roundRect(margin, page_height - 240, content_width, 110, 8, fill=1, stroke=0)
+    canvas.setFillColor(BRAND_DARK)
+    canvas.setFont("Helvetica-Bold", 16)
+    canvas.drawString(margin + 22, page_height - 175, "Nenhum dado encontrado para os filtros selecionados")
+    canvas.setFillColor(BRAND_MUTED)
+    canvas.setFont("Helvetica", 9)
+    canvas.drawString(margin + 22, page_height - 196, "Verifique o período, a conta selecionada ou execute uma nova sincronização antes de exportar o relatório.")
+    _draw_canvas_footer(canvas, margin, page_width, period)
+    canvas.showPage()
+    canvas.save()
+    return output.getvalue()
+
+
+def _draw_page_background(canvas, page_width: float, page_height: float) -> None:
+    canvas.setFillColor(colors.HexColor("#F3F6F8"))
+    canvas.rect(0, 0, page_width, page_height, fill=1, stroke=0)
+    canvas.setFillColor(colors.HexColor("#E7EDF2"))
+    canvas.rect(0, 0, page_width, 26, fill=1, stroke=0)
+
+
+def _draw_canvas_header(canvas, x: float, y: float, width: float, height: float, period: str) -> None:
+    canvas.setFillColor(BRAND_DARK)
+    canvas.roundRect(x, y, width, height, 10, fill=1, stroke=0)
+    canvas.setFillColor(BRAND_GREEN)
+    canvas.circle(x + 28, y + height - 25, 12, fill=1, stroke=0)
+    canvas.setFillColor(BRAND_DARK)
+    canvas.setFont("Helvetica-Bold", 13)
+    canvas.drawCentredString(x + 28, y + height - 30, "P")
+    canvas.setFillColor(BRAND_GREEN)
+    canvas.setFont("Helvetica-Bold", 7.5)
+    canvas.drawString(x + 52, y + height - 22, "RELATÓRIO PREMIUM")
+    canvas.setFillColor(colors.white)
+    canvas.setFont("Helvetica-Bold", 20)
+    canvas.drawString(x + 52, y + height - 47, "Análise de desempenho de campanhas")
+    canvas.setFillColor(colors.HexColor("#C9D4DD"))
+    canvas.setFont("Helvetica", 8.5)
+    canvas.drawString(x + 52, y + 14, "Meta Ads | Campanhas de engajamento para mensagens, cliques, alcance e investimento")
+    canvas.setFillColor(colors.HexColor("#19242E"))
+    canvas.roundRect(x + width - 190, y + 17, 166, 36, 8, fill=1, stroke=0)
+    canvas.setFillColor(colors.HexColor("#C9D4DD"))
+    canvas.setFont("Helvetica", 7.5)
+    canvas.drawRightString(x + width - 34, y + 38, "Período analisado")
+    canvas.setFillColor(colors.white)
+    canvas.setFont("Helvetica-Bold", 10)
+    canvas.drawRightString(x + width - 34, y + 24, period)
+
+
+def _draw_metric_card(canvas, x: float, y: float, width: float, height: float, label: str, value: str, delta: str, previous: str) -> None:
+    canvas.setFillColor(colors.white)
+    canvas.roundRect(x, y, width, height, 8, fill=1, stroke=0)
+    canvas.setStrokeColor(colors.HexColor("#DDE5EC"))
+    canvas.roundRect(x, y, width, height, 8, fill=0, stroke=1)
+    canvas.setFillColor(BRAND_MUTED)
+    canvas.setFont("Helvetica-Bold", 7.5)
+    canvas.drawString(x + 12, y + height - 17, label.upper())
+    canvas.setFillColor(BRAND_DARK)
+    canvas.setFont("Helvetica-Bold", 17)
+    canvas.drawString(x + 12, y + height - 40, value)
+    canvas.setFillColor(BRAND_GREEN if not delta.startswith("-") else colors.HexColor("#D65F5F"))
+    canvas.setFont("Helvetica-Bold", 8)
+    canvas.drawString(x + 12, y + 15, delta)
+    canvas.setFillColor(BRAND_MUTED)
+    _draw_fitted_text(canvas, previous, x + 58, y + 15, width - 68, "Helvetica", 7)
+
+
+def _draw_campaign_overview(canvas, x: float, y: float, width: float, height: float, campaign_summary: pd.DataFrame, totals: dict[str, float]) -> None:
+    canvas.setFillColor(colors.white)
+    canvas.roundRect(x, y, width, height, 8, fill=1, stroke=0)
+    canvas.setStrokeColor(colors.HexColor("#DDE5EC"))
+    canvas.roundRect(x, y, width, height, 8, fill=0, stroke=1)
+    canvas.setFillColor(BRAND_DARK)
+    canvas.setFont("Helvetica-Bold", 11)
+    canvas.drawString(x + 12, y + height - 18, "Campanhas")
+    canvas.setFont("Helvetica", 8)
+    canvas.setFillColor(colors.HexColor("#24313D"))
+    for index, name in enumerate(campaign_summary["Campanha"].head(3).tolist()):
+        _draw_fitted_text(canvas, str(name), x + 12, y + height - 36 - index * 13, 205, "Helvetica", 8)
+    metrics = [
+        ("Alcance total", _integer(totals["reach"])),
+        ("Impressões totais", _integer(totals["impressions"])),
+        ("Total de cliques", _integer(totals["clicks"])),
+        ("Mensagens", _number(totals["messages"])),
+        ("Valor investido", _money(totals["spend"])),
+        ("Custo/msg.", _money(totals["cost_per_message"])),
+        ("CPC médio", _money(totals["cpc"])),
+        ("CTR", _percent(totals["ctr"])),
+        ("CPM médio", _money(_safe_div(totals["spend"] * 1000, totals["impressions"]))),
+        ("Frequência", _ratio(_safe_div(totals["impressions"], totals["reach"]))),
+    ]
+    grid_x = x + 238
+    cell_w = (width - 252) / 5
+    cell_h = 28
+    for index, (label, value) in enumerate(metrics):
+        col = index % 5
+        row = index // 5
+        cx = grid_x + col * cell_w
+        cy = y + height - 39 - row * cell_h
+        canvas.setFillColor(BRAND_SOFT)
+        canvas.roundRect(cx, cy, cell_w - 6, 22, 4, fill=1, stroke=0)
+        canvas.setFillColor(BRAND_MUTED)
+        _draw_fitted_text(canvas, label, cx + 6, cy + 13, cell_w - 18, "Helvetica-Bold", 6.3)
+        canvas.setFillColor(BRAND_DARK)
+        _draw_fitted_text(canvas, value, cx + 6, cy + 4, cell_w - 18, "Helvetica-Bold", 8.5)
+
+
+def _draw_actions_panel(canvas, x: float, y: float, width: float, height: float, totals: dict[str, float]) -> None:
+    canvas.setFillColor(colors.white)
+    canvas.roundRect(x, y, width, height, 8, fill=1, stroke=0)
+    canvas.setFillColor(BRAND_DARK)
+    canvas.setFont("Helvetica-Bold", 11)
+    canvas.drawString(x + 12, y + height - 18, "Conversões e ações por tipo")
+    rows = [
+        ("Mensagens iniciadas", _number(totals["messages"]), _money(totals["cost_per_message"])),
+        ("Cliques nos links", _integer(totals["clicks"]), _money(totals["cpc"])),
+        ("Pessoas alcançadas", _integer(totals["reach"]), _money(_safe_div(totals["spend"], totals["reach"]))),
+        ("Impressões", _integer(totals["impressions"]), f"{_money(_safe_div(totals['spend'] * 1000, totals['impressions']))} CPM"),
+    ]
+    _draw_compact_table(canvas, x + 12, y + 16, width - 24, height - 44, ["Tipo", "Total", "Custo por ação"], rows, [0.52, 0.22, 0.26])
+
+
+def _draw_daily_panel(canvas, x: float, y: float, width: float, height: float, daily_summary: pd.DataFrame) -> None:
+    canvas.setFillColor(colors.white)
+    canvas.roundRect(x, y, width, height, 8, fill=1, stroke=0)
+    canvas.setFillColor(BRAND_DARK)
+    canvas.setFont("Helvetica-Bold", 11)
+    canvas.drawString(x + 12, y + height - 18, "Evolução diária de mensagens e cliques")
+    data = daily_summary.tail(8)
+    if data.empty:
+        canvas.setFillColor(BRAND_MUTED)
+        canvas.setFont("Helvetica", 8)
+        canvas.drawString(x + 12, y + height - 44, "Sem dados diários para o período.")
+        return
+    max_value = max(float(data["Mensagens"].max()), float(data["Cliques"].max()), 1)
+    chart_x = x + 18
+    chart_y = y + 30
+    chart_w = width - 36
+    group_w = chart_w / len(data)
+    for index, (_, row) in enumerate(data.iterrows()):
+        base_x = chart_x + index * group_w
+        messages_h = (float(row["Mensagens"]) / max_value) * 52
+        clicks_h = (float(row["Cliques"]) / max_value) * 52
+        canvas.setFillColor(BRAND_GREEN)
+        canvas.roundRect(base_x + 7, chart_y, max(group_w * 0.28, 4), messages_h, 2, fill=1, stroke=0)
+        canvas.setFillColor(BRAND_CYAN)
+        canvas.roundRect(base_x + 7 + max(group_w * 0.32, 7), chart_y, max(group_w * 0.28, 4), clicks_h, 2, fill=1, stroke=0)
+        label = row["Data"].strftime("%d/%m") if hasattr(row["Data"], "strftime") else str(row["Data"])
+        canvas.setFillColor(BRAND_MUTED)
+        canvas.setFont("Helvetica", 6.2)
+        canvas.drawCentredString(base_x + group_w / 2, y + 15, label)
+    canvas.setFillColor(BRAND_GREEN)
+    canvas.rect(x + width - 112, y + height - 24, 7, 7, fill=1, stroke=0)
+    canvas.setFillColor(BRAND_MUTED)
+    canvas.setFont("Helvetica", 7)
+    canvas.drawString(x + width - 101, y + height - 24, "Mensagens")
+    canvas.setFillColor(BRAND_CYAN)
+    canvas.rect(x + width - 51, y + height - 24, 7, 7, fill=1, stroke=0)
+    canvas.setFillColor(BRAND_MUTED)
+    canvas.drawString(x + width - 40, y + height - 24, "Cliques")
+
+
+def _draw_featured_table(canvas, x: float, y: float, width: float, height: float, campaign_summary: pd.DataFrame) -> None:
+    canvas.setFillColor(colors.white)
+    canvas.roundRect(x, y, width, height, 8, fill=1, stroke=0)
+    canvas.setFillColor(BRAND_DARK)
+    canvas.setFont("Helvetica-Bold", 11)
+    canvas.drawString(x + 12, y + height - 18, "Campanhas em destaque")
+    rows = []
+    for _, row in campaign_summary.iterrows():
+        cpm = _safe_div(float(row["Investimento"]) * 1000, float(row["Impressões"]))
+        rows.append(
+            (
+                str(row["Campanha"]),
+                str(row["Modelo da Campanha"]),
+                _money(float(row["Custo por Mensagem"])),
+                _money(float(row["Investimento"])),
+                _integer(float(row["Alcance"])),
+                _integer(float(row["Impressões"])),
+                _integer(float(row["Cliques"])),
+                _money(float(row["CPC"])),
+                _money(cpm),
+                _ratio(float(row["Frequência"])),
+            )
+        )
+    if not rows:
+        rows = [("Sem campanhas", "-", "-", "-", "-", "-", "-", "-", "-", "-")]
+    _draw_compact_table(
+        canvas,
+        x + 12,
+        y + 14,
+        width - 24,
+        height - 42,
+        ["Campanha", "Modelo", "Custo/msg.", "Invest.", "Alcance", "Impressões", "Cliques", "CPC", "CPM", "Freq."],
+        rows,
+        [0.22, 0.16, 0.095, 0.095, 0.09, 0.095, 0.075, 0.07, 0.07, 0.05],
+        font_size=6.2,
+    )
+
+
+def _draw_compact_table(
+    canvas,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    headers: list[str],
+    rows: list[tuple],
+    weights: list[float],
+    font_size: float = 7,
+) -> None:
+    header_h = 17
+    row_h = min(15, (height - header_h) / max(len(rows), 1))
+    col_widths = [width * weight / sum(weights) for weight in weights]
+    canvas.setFillColor(BRAND_PANEL)
+    canvas.roundRect(x, y + height - header_h, width, header_h, 4, fill=1, stroke=0)
+    cursor = x
+    for index, header in enumerate(headers):
+        canvas.setFillColor(colors.white)
+        _draw_fitted_text(canvas, header, cursor + 4, y + height - 11, col_widths[index] - 8, "Helvetica-Bold", font_size)
+        cursor += col_widths[index]
+    for row_index, row in enumerate(rows):
+        row_y = y + height - header_h - (row_index + 1) * row_h
+        canvas.setFillColor(colors.white if row_index % 2 == 0 else BRAND_SOFT)
+        canvas.rect(x, row_y, width, row_h, fill=1, stroke=0)
+        cursor = x
+        for col_index, value in enumerate(row):
+            canvas.setFillColor(colors.HexColor("#1D2933"))
+            if col_index > 1:
+                _draw_right_fitted_text(canvas, str(value), cursor + col_widths[col_index] - 4, row_y + 4, col_widths[col_index] - 8, "Helvetica", font_size)
+            else:
+                _draw_fitted_text(canvas, str(value), cursor + 4, row_y + 4, col_widths[col_index] - 8, "Helvetica", font_size)
+            cursor += col_widths[col_index]
+        canvas.setStrokeColor(colors.HexColor("#E1E7ED"))
+        canvas.line(x, row_y, x + width, row_y)
+
+
+def _draw_canvas_footer(canvas, margin: float, page_width: float, period: str) -> None:
+    canvas.setFillColor(BRAND_MUTED)
+    canvas.setFont("Helvetica", 7)
+    canvas.drawString(margin, 12, "Paid Traffic Dashboard | Relatório executivo gerado automaticamente")
+    canvas.drawRightString(page_width - margin, 12, f"Período: {period}")
+
+
+def _previous_label(value: float, formatter) -> str:
+    if not value:
+        return "sem período anterior"
+    return f"{formatter(value)} no período anterior"
+
+
+def _draw_fitted_text(canvas, text: str, x: float, y: float, max_width: float, font_name: str, font_size: float) -> None:
+    text = _clip_to_width(canvas, text, max_width, font_name, font_size)
+    canvas.setFont(font_name, font_size)
+    canvas.drawString(x, y, text)
+
+
+def _draw_right_fitted_text(canvas, text: str, x: float, y: float, max_width: float, font_name: str, font_size: float) -> None:
+    text = _clip_to_width(canvas, text, max_width, font_name, font_size)
+    canvas.setFont(font_name, font_size)
+    canvas.drawRightString(x, y, text)
+
+
+def _clip_to_width(canvas, text: str, max_width: float, font_name: str, font_size: float) -> str:
+    clean = " ".join(str(text or "").split())
+    if canvas.stringWidth(clean, font_name, font_size) <= max_width:
+        return clean
+    suffix = "..."
+    while clean and canvas.stringWidth(clean + suffix, font_name, font_size) > max_width:
+        clean = clean[:-1]
+    return clean.rstrip() + suffix if clean else suffix
 
 
 def _aggregate(df: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
