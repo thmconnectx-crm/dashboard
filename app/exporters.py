@@ -292,6 +292,12 @@ def _is_report_support_campaign(campaign_name: str) -> bool:
     return "copia" in name_text or "copy" in name_text
 
 
+def _display_campaign_model(model: str, campaign_name: str) -> str:
+    if _is_awareness_campaign(model, campaign_name):
+        return "Reconhecimento de marca"
+    return str(model or "Não informado")
+
+
 def _normalize_text(value: str) -> str:
     replacements = {
         "á": "a",
@@ -482,7 +488,7 @@ def _draw_featured_table(canvas, x: float, y: float, width: float, height: float
         rows.append(
             (
                 str(row["Campanha"]),
-                str(row["Modelo da Campanha"]),
+                _display_campaign_model(str(row["Modelo da Campanha"]), str(row["Campanha"])),
                 _money(float(row["Custo por Mensagem"])),
                 _money(float(row["Investimento"])),
                 _integer(float(row["Alcance"])),
@@ -683,7 +689,7 @@ def _draw_awareness_featured_table(canvas, x: float, y: float, width: float, hei
         rows.append(
             (
                 str(row["Campanha"]),
-                str(row["Modelo da Campanha"]),
+                _display_campaign_model(str(row["Modelo da Campanha"]), str(row["Campanha"])),
                 _money(float(row["Investimento"])),
                 _integer(float(row["Alcance"])),
                 _integer(float(row["Impressões"])),
@@ -1014,7 +1020,7 @@ def _featured_campaigns_table(df: pd.DataFrame, styles: dict) -> Table:
         rows.append(
             [
                 _clip(str(row["Campanha"]), 34),
-                _clip(str(row.get("Modelo da Campanha", "Não informado")), 26),
+                _clip(_display_campaign_model(str(row.get("Modelo da Campanha", "Não informado")), str(row.get("Campanha", ""))), 26),
                 _money(float(row["Custo por Mensagem"])),
                 _money(float(row["Investimento"])),
                 _integer(float(row["Alcance"])),
@@ -1383,7 +1389,7 @@ def _objective_label(value: str) -> str:
     if normalized in {"OUTCOME_SALES", "CONVERSIONS"}:
         return "Vendas / conversões"
     if normalized in {"OUTCOME_AWARENESS", "BRAND_AWARENESS", "REACH"}:
-        return "Reconhecimento / alcance"
+        return "Reconhecimento de marca"
     return value.replace("_", " ").title() if value else "Não informado"
 
 
