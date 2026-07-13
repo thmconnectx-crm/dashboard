@@ -16,6 +16,7 @@ class ConnectorCampaign:
     account_id: str
     name: str
     status: str = ""
+    objective: str = ""
 
 
 @dataclass(frozen=True)
@@ -26,14 +27,18 @@ class ConnectorMetric:
     campaign_name: str
     date: date
     impressions: int = 0
+    reach: int = 0
     clicks: int = 0
     spend: float = 0.0
+    messages: float = 0.0
     conversions: float = 0.0
     conversion_value: float = 0.0
     ctr: float = 0.0
     cpc: float = 0.0
+    cost_per_message: float = 0.0
     cost_per_conversion: float = 0.0
     roas: float = 0.0
+    campaign_objective: str = ""
 
 
 class AdsConnector(ABC):

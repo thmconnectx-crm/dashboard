@@ -124,7 +124,7 @@ async function loadMetricTable() {
   const body = document.querySelector("#metricsTable");
   body.innerHTML = "";
   if (!payload.items.length) {
-    body.innerHTML = `<tr><td class="empty-row" colspan="11">Nenhum dado salvo para este filtro. Sincronize a conta ou ajuste o período selecionado.</td></tr>`;
+    body.innerHTML = `<tr><td class="empty-row" colspan="13">Nenhum dado salvo para este filtro. Sincronize a conta ou ajuste o período selecionado.</td></tr>`;
     return;
   }
   for (const row of payload.items) {
@@ -133,15 +133,17 @@ async function loadMetricTable() {
       `<tr>
         <td>${formatDate(row.date)}</td>
         <td><span class="platform-tag ${row.platform === "meta" ? "meta" : ""}">${platformLabel(row.platform)}</span></td>
+        <td>${campaignModel(row.campaign_objective)}</td>
         <td>${row.campaign_name}</td>
+        <td class="numeric">${number.format(row.reach || 0)}</td>
         <td class="numeric">${number.format(row.impressions)}</td>
+        <td class="numeric">${frequency(row.impressions, row.reach).toFixed(2)}</td>
         <td class="numeric">${number.format(row.clicks)}</td>
         <td class="numeric">${row.ctr.toFixed(2)}%</td>
         <td class="numeric">${money.format(row.cpc)}</td>
         <td class="numeric">${money.format(row.spend)}</td>
-        <td class="numeric">${number.format(row.conversions)}</td>
-        <td class="numeric">${money.format(row.cost_per_conversion)}</td>
-        <td class="numeric">${row.roas.toFixed(2)}</td>
+        <td class="numeric">${number.format(row.messages || row.conversions || 0)}</td>
+        <td class="numeric">${money.format(row.cost_per_message || row.cost_per_conversion || 0)}</td>
       </tr>`
     );
   }
@@ -170,22 +172,29 @@ function renderMetricTiles(summary) {
   const totals = summary.reduce(
     (acc, row) => {
       acc.impressions += row.impressions;
+      acc.reach += row.reach || 0;
       acc.clicks += row.clicks;
       acc.spend += row.spend;
+      acc.messages += row.messages || 0;
       acc.conversions += row.conversions;
       acc.value += row.conversion_value;
       return acc;
     },
-    { impressions: 0, clicks: 0, spend: 0, conversions: 0, value: 0 }
+    { impressions: 0, reach: 0, clicks: 0, spend: 0, messages: 0, conversions: 0, value: 0 }
   );
   const ctr = totals.impressions ? (totals.clicks / totals.impressions) * 100 : 0;
-  const cpa = totals.conversions ? totals.spend / totals.conversions : 0;
-  const roas = totals.spend ? totals.value / totals.spend : 0;
+  const costPerMessage = totals.messages ? totals.spend / totals.messages : 0;
+  const avgFrequency = frequency(totals.impressions, totals.reach);
   const tiles = [
     ["Investimento", money.format(totals.spend), "wallet-cards", "Total aplicado no período"],
+    ["Mensagens", number.format(totals.messages), "messages-square", "Conversas iniciadas"],
+    ["Custo/msg.", money.format(costPerMessage), "badge-dollar-sign", "Custo por mensagem"],
+    ["Alcance", number.format(totals.reach), "radar", "Pessoas alcançadas"],
+    ["Impressões", number.format(totals.impressions), "eye", "Exibições totais"],
+    ["Frequência", avgFrequency.toFixed(2), "repeat-2", "Média de impressões por pessoa"],
     ["Cliques", number.format(totals.clicks), "mouse-pointer-click", "Volume de tráfego capturado"],
-    ["CTR médio", `${ctr.toFixed(2)}%`, "activity", `${number.format(totals.impressions)} impressões`],
-    ["CPA / ROAS", `${money.format(cpa)} / ${roas.toFixed(2)}`, "badge-dollar-sign", "Eficiência de conversão"],
+    ["CTR médio", `${ctr.toFixed(2)}%`, "activity", "Taxa de cliques"],
+    ["CPC médio", money.format(totals.clicks ? totals.spend / totals.clicks : 0), "mouse-pointer-2", "Custo médio por clique"],
   ];
   document.querySelector("#metricGrid").innerHTML = tiles
     .map(
@@ -210,8 +219,8 @@ function renderSummaryLedger(summary) {
     .map(
       (row) =>
         `<div class="ledger-item ${row.platform === "meta" ? "meta" : ""}">
-          <span><i class="ledger-dot"></i>${platformLabel(row.platform)} | ROAS ${row.roas.toFixed(2)}</span>
-          <strong>${money.format(row.spend)} investidos</strong>
+          <span><i class="ledger-dot"></i>${platformLabel(row.platform)} | ${number.format(row.messages || 0)} mensagens</span>
+          <strong>${money.format(row.cost_per_message || 0)} por msg.</strong>
         </div>`
     )
     .join("");
@@ -284,8 +293,8 @@ function renderCharts(summary, daily) {
           fill: true,
         },
         {
-          label: "Conversões",
-          data: labels.map((day) => sumDaily(daily, day, "conversions")),
+          label: "Mensagens",
+          data: labels.map((day) => sumDaily(daily, day, "messages")),
           borderColor: "#e2a15b",
           backgroundColor: "rgba(226, 161, 91, 0.13)",
           pointRadius: 3,
@@ -329,8 +338,8 @@ function renderCharts(summary, daily) {
           yAxisID: "money",
         },
         {
-          label: `${platformLabel(platform)} conversões`,
-          data: trendLabels.map((day) => sumDailyByPlatform(daily, day, platform, "conversions")),
+          label: `${platformLabel(platform)} mensagens`,
+          data: trendLabels.map((day) => sumDailyByPlatform(daily, day, platform, "messages")),
           borderColor: colors[platform]?.conversions || "#f0c18c",
           backgroundColor: "transparent",
           borderDash: [5, 5],
@@ -387,7 +396,7 @@ function renderChartFallback(summary, daily) {
           </div>`;
         })
         .join("")}</div>`
-    : `<div class="fallback-empty">Sincronize dados para visualizar a evolução diária.</div>`;
+    : `<div class="fallback-empty">Sincronize dados para visualizar a evolução diária de cliques e mensagens.</div>`;
 
   ensureFallback(platformTrendCanvas, "platformTrendFallback").innerHTML = labels.length
     ? `<div class="fallback-bars">${labels
@@ -400,7 +409,7 @@ function renderChartFallback(summary, daily) {
           </div>`;
         })
         .join("")}</div>`
-    : `<div class="fallback-empty">Sincronize dados para visualizar investimento e conversões por plataforma.</div>`;
+    : `<div class="fallback-empty">Sincronize dados para visualizar investimento e mensagens por plataforma.</div>`;
 }
 
 function ensureFallback(canvas, id) {
@@ -485,15 +494,29 @@ function selectedPlatforms() {
 }
 
 function sumDaily(rows, day, field) {
-  return rows.filter((row) => row.date === day && selectedPlatforms().includes(row.platform)).reduce((sum, row) => sum + row[field], 0);
+  return rows.filter((row) => row.date === day && selectedPlatforms().includes(row.platform)).reduce((sum, row) => sum + (row[field] || 0), 0);
 }
 
 function sumDailyByPlatform(rows, day, platform, field) {
-  return rows.filter((row) => row.date === day && row.platform === platform && selectedPlatforms().includes(row.platform)).reduce((sum, row) => sum + row[field], 0);
+  return rows.filter((row) => row.date === day && row.platform === platform && selectedPlatforms().includes(row.platform)).reduce((sum, row) => sum + (row[field] || 0), 0);
 }
 
 function platformLabel(platform) {
   return platform === "google" ? "Google Ads" : "Meta Ads";
+}
+
+function campaignModel(objective) {
+  const value = (objective || "").toUpperCase();
+  if (["OUTCOME_ENGAGEMENT", "MESSAGES", "POST_ENGAGEMENT"].includes(value)) return "Engajamento para mensagens";
+  if (["OUTCOME_LEADS", "LEAD_GENERATION"].includes(value)) return "Geração de cadastros";
+  if (["OUTCOME_TRAFFIC", "LINK_CLICKS"].includes(value)) return "Tráfego";
+  if (["OUTCOME_SALES", "CONVERSIONS"].includes(value)) return "Vendas / conversões";
+  if (["OUTCOME_AWARENESS", "BRAND_AWARENESS", "REACH"].includes(value)) return "Reconhecimento / alcance";
+  return objective ? objective.replaceAll("_", " ").toLowerCase() : "Não informado";
+}
+
+function frequency(impressions, reach) {
+  return reach ? impressions / reach : 0;
 }
 
 function formatDate(value) {

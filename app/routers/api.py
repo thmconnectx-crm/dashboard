@@ -97,6 +97,7 @@ def campaigns(platform: str | None = None, account_id: str | None = None, db: Se
                 "id": row.external_id,
                 "name": row.name,
                 "status": row.status,
+                "objective": row.objective,
                 "updated_at": row.updated_at.isoformat() if row.updated_at else None,
             }
             for row in list_saved_campaigns(db, platform, account_id)
@@ -191,14 +192,18 @@ def _metric_to_dict(row) -> dict:
         "account_id": row.account_id,
         "campaign_id": row.campaign_id,
         "campaign_name": row.campaign_name,
+        "campaign_objective": row.campaign_objective,
         "date": row.date.isoformat(),
         "impressions": row.impressions,
+        "reach": row.reach,
         "clicks": row.clicks,
         "spend": row.spend,
+        "messages": row.messages,
         "conversions": row.conversions,
         "conversion_value": row.conversion_value,
         "ctr": row.ctr,
         "cpc": row.cpc,
+        "cost_per_message": row.cost_per_message,
         "cost_per_conversion": row.cost_per_conversion,
         "roas": row.roas,
     }
@@ -214,30 +219,40 @@ def _aggregate_metric_rows(rows: list, by_day: bool = False) -> list[dict]:
                 "date": row.date.isoformat() if by_day else None,
                 "platform": row.platform,
                 "impressions": 0,
+                "reach": 0,
                 "clicks": 0,
                 "spend": 0.0,
+                "messages": 0.0,
                 "conversions": 0.0,
                 "conversion_value": 0.0,
             },
         )
         bucket["impressions"] += row.impressions
+        bucket["reach"] += row.reach
         bucket["clicks"] += row.clicks
         bucket["spend"] += row.spend
+        bucket["messages"] += row.messages
         bucket["conversions"] += row.conversions
         bucket["conversion_value"] += row.conversion_value
 
     output = []
     for bucket in buckets.values():
         impressions = bucket["impressions"]
+        reach = bucket["reach"]
         clicks = bucket["clicks"]
         spend = bucket["spend"]
+        messages = bucket["messages"]
         conversions = bucket["conversions"]
         value = bucket["conversion_value"]
+        cost_per_message = spend / messages if messages else 0.0
         item = {
             "platform": bucket["platform"],
             "impressions": int(impressions),
+            "reach": int(reach),
             "clicks": int(clicks),
             "spend": round(float(spend), 2),
+            "messages": round(float(messages), 2),
+            "cost_per_message": round(float(cost_per_message), 2),
             "conversions": round(float(conversions), 2),
             "conversion_value": round(float(value), 2),
             **compute_derived_metrics(impressions, clicks, spend, conversions, value),

@@ -68,7 +68,7 @@ class MetaAdsConnector(AdsConnector):
         token = self._access_token()
         params = {
             "access_token": token,
-            "fields": "id,name,status,effective_status",
+            "fields": "id,name,status,effective_status,objective",
             "limit": 200,
         }
         async with httpx.AsyncClient(timeout=30) as client:
@@ -79,6 +79,7 @@ class MetaAdsConnector(AdsConnector):
                 account_id=_normalize_account_id(account_id),
                 name=item.get("name", "Sem nome"),
                 status=item.get("effective_status") or item.get("status", ""),
+                objective=item.get("objective", ""),
             )
             for item in payload.get("data", [])
         ]
@@ -104,6 +105,7 @@ class MetaAdsConnector(AdsConnector):
                     "date_start",
                     "campaign_id",
                     "campaign_name",
+                    "reach",
                     "impressions",
                     "clicks",
                     "ctr",
@@ -122,27 +124,36 @@ class MetaAdsConnector(AdsConnector):
         async with httpx.AsyncClient(timeout=60) as client:
             payload = await request_json(client, "GET", self._graph_url(f"{_normalize_account_id(account_id)}/insights"), self.platform, params=params)
 
+        campaign_objectives = _campaign_objectives_from_db(self.platform, _normalize_account_id(account_id))
         metrics: list[ConnectorMetric] = []
         for item in payload.get("data", []):
+            campaign_id = item.get("campaign_id", "")
             spend = float(item.get("spend", 0) or 0)
             clicks = int(item.get("clicks", 0) or 0)
-            conversions = _sum_actions(item.get("actions", []))
+            reach = int(item.get("reach", 0) or 0)
+            messages = _sum_messages(item.get("actions", []))
+            conversions = messages or _sum_conversions(item.get("actions", []))
             conversion_value = _sum_actions(item.get("action_values", []))
             roas = _extract_roas(item.get("purchase_roas", []), spend, conversion_value)
+            cost_per_message = round(spend / messages, 2) if messages else 0.0
             metrics.append(
                 ConnectorMetric(
                     platform=self.platform,
                     account_id=_normalize_account_id(account_id),
-                    campaign_id=item.get("campaign_id", ""),
+                    campaign_id=campaign_id,
                     campaign_name=item.get("campaign_name", "Sem nome"),
+                    campaign_objective=campaign_objectives.get(campaign_id, ""),
                     date=date.fromisoformat(item["date_start"]),
                     impressions=int(item.get("impressions", 0) or 0),
+                    reach=reach,
                     clicks=clicks,
                     spend=round(spend, 2),
+                    messages=messages,
                     conversions=conversions,
                     conversion_value=conversion_value,
                     ctr=float(item.get("ctr", 0) or 0),
                     cpc=float(item.get("cpc", 0) or 0) if clicks else 0.0,
+                    cost_per_message=cost_per_message,
                     cost_per_conversion=round(spend / conversions, 2) if conversions else 0.0,
                     roas=roas,
                 )
@@ -167,7 +178,40 @@ def _normalize_account_id(account_id: str) -> str:
     return clean if clean.startswith("act_") else f"act_{clean}"
 
 
+def _campaign_objectives_from_db(platform: str, account_id: str) -> dict[str, str]:
+    from app.models import Campaign
+
+    with create_session() as db:
+        rows = db.query(Campaign).filter(Campaign.platform == platform, Campaign.account_id == account_id).all()
+        return {row.external_id: row.objective for row in rows}
+
+
 def _sum_actions(actions: list[dict]) -> float:
+    if not actions:
+        return 0.0
+    return round(sum(float(action.get("value", 0) or 0) for action in actions), 2)
+
+
+def _sum_messages(actions: list[dict]) -> float:
+    if not actions:
+        return 0.0
+    message_types = {
+        "onsite_conversion.messaging_conversation_started_7d",
+        "onsite_conversion.messaging_first_reply",
+        "onsite_conversion.messaging_user_depth_2_message_send",
+        "onsite_conversion.messaging_user_depth_3_message_send",
+        "onsite_conversion.messaging_user_subscribed",
+        "messaging_conversation_started_7d",
+    }
+    total = 0.0
+    for action in actions:
+        action_type = action.get("action_type", "")
+        if action_type in message_types or "messaging_conversation" in action_type:
+            total += float(action.get("value", 0) or 0)
+    return round(total, 2)
+
+
+def _sum_conversions(actions: list[dict]) -> float:
     if not actions:
         return 0.0
     preferred = {

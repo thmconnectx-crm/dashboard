@@ -32,11 +32,17 @@ def rows_to_dataframe(rows: list[CampaignMetric]) -> pd.DataFrame:
             "Plataforma": _platform_label(row.platform),
             "Conta": row.account_id,
             "Campanha": row.campaign_name,
+            "Modelo da Campanha": _objective_label(getattr(row, "campaign_objective", "")),
+            "Objetivo técnico": getattr(row, "campaign_objective", ""),
+            "Alcance": getattr(row, "reach", 0),
             "Impressões": row.impressions,
+            "Frequência": _safe_div(row.impressions, getattr(row, "reach", 0)),
             "Cliques": row.clicks,
             "CTR (%)": row.ctr,
             "CPC": row.cpc,
             "Investimento": row.spend,
+            "Mensagens": getattr(row, "messages", 0.0),
+            "Custo por Mensagem": getattr(row, "cost_per_message", 0.0),
             "Conversões": row.conversions,
             "Custo/Conv.": row.cost_per_conversion,
             "Valor de Conversão": row.conversion_value,
@@ -57,7 +63,7 @@ def build_excel(rows: list[CampaignMetric]) -> bytes:
             )
         else:
             platform_summary = _aggregate(df, ["Plataforma"])
-            campaign_summary = _aggregate(df, ["Plataforma", "Conta", "Campanha"]).sort_values(
+            campaign_summary = _aggregate(df, ["Plataforma", "Conta", "Modelo da Campanha", "Campanha"]).sort_values(
                 by="Investimento", ascending=False
             )
             daily_summary = _aggregate(df, ["Data", "Plataforma"]).sort_values(by=["Data", "Plataforma"])
@@ -65,12 +71,13 @@ def build_excel(rows: list[CampaignMetric]) -> bytes:
             overview = pd.DataFrame(
                 [
                     {"Indicador": "Investimento total", "Valor": _money(float(df["Investimento"].sum()))},
-                    {"Indicador": "Conversões totais", "Valor": _number(float(df["Conversões"].sum()))},
-                    {"Indicador": "Valor de conversão", "Valor": _money(float(df["Valor de Conversão"].sum()))},
-                    {"Indicador": "ROAS médio", "Valor": _ratio(_safe_div(df["Valor de Conversão"].sum(), df["Investimento"].sum()))},
+                    {"Indicador": "Mensagens iniciadas", "Valor": _number(float(df["Mensagens"].sum()))},
+                    {"Indicador": "Custo por mensagem", "Valor": _money(_safe_div(df["Investimento"].sum(), df["Mensagens"].sum()))},
+                    {"Indicador": "Alcance", "Valor": _integer(float(df["Alcance"].sum()))},
+                    {"Indicador": "Impressões", "Valor": _integer(float(df["Impressões"].sum()))},
+                    {"Indicador": "Frequência", "Valor": _ratio(_safe_div(df["Impressões"].sum(), df["Alcance"].sum()))},
                     {"Indicador": "CTR médio", "Valor": _percent(_safe_div(df["Cliques"].sum(), df["Impressões"].sum()) * 100)},
                     {"Indicador": "CPC médio", "Valor": _money(_safe_div(df["Investimento"].sum(), df["Cliques"].sum()))},
-                    {"Indicador": "CPA médio", "Valor": _money(_safe_div(df["Investimento"].sum(), df["Conversões"].sum()))},
                 ]
             )
             overview.to_excel(writer, index=False, sheet_name="Resumo")
@@ -93,7 +100,7 @@ def build_pdf(rows: list[CampaignMetric], start_date: date | None = None, end_da
         leftMargin=18 * mm,
         topMargin=14 * mm,
         bottomMargin=14 * mm,
-        title="Relatório de Tráfego Pago",
+        title="Relatório de Campanhas de Mensagens",
         author="Paid Traffic Dashboard",
     )
     styles = _pdf_styles()
@@ -118,7 +125,7 @@ def build_pdf(rows: list[CampaignMetric], start_date: date | None = None, end_da
         return output.getvalue()
 
     platform_summary = _aggregate(df, ["Plataforma"])
-    campaign_summary = _aggregate(df, ["Plataforma", "Conta", "Campanha"]).sort_values(by="Investimento", ascending=False)
+    campaign_summary = _aggregate(df, ["Plataforma", "Conta", "Modelo da Campanha", "Campanha"]).sort_values(by="Investimento", ascending=False)
     daily_summary = _aggregate(df, ["Data", "Plataforma"]).sort_values(by=["Data", "Plataforma"])
 
     totals = _totals(df)
@@ -132,8 +139,8 @@ def build_pdf(rows: list[CampaignMetric], start_date: date | None = None, end_da
     story.append(
         _data_table(
             platform_summary,
-            ["Plataforma", "Investimento", "Conversões", "Valor de Conversão", "ROAS", "CTR (%)", "CPC", "Custo/Conv."],
-            money_cols={"Investimento", "Valor de Conversão", "CPC", "Custo/Conv."},
+            ["Plataforma", "Investimento", "Mensagens", "Custo por Mensagem", "Alcance", "Impressões", "Frequência", "Cliques", "CTR (%)", "CPC"],
+            money_cols={"Investimento", "Custo por Mensagem", "CPC"},
             percent_cols={"CTR (%)"},
             width=258 * mm,
         )
@@ -144,11 +151,11 @@ def build_pdf(rows: list[CampaignMetric], start_date: date | None = None, end_da
     story.append(
         _data_table(
             campaign_summary.head(12),
-            ["Plataforma", "Conta", "Campanha", "Investimento", "Conversões", "ROAS", "CTR (%)", "Custo/Conv."],
-            money_cols={"Investimento", "Custo/Conv."},
+            ["Plataforma", "Modelo da Campanha", "Campanha", "Investimento", "Mensagens", "Custo por Mensagem", "Alcance", "Frequência", "Cliques", "CTR (%)"],
+            money_cols={"Investimento", "Custo por Mensagem"},
             percent_cols={"CTR (%)"},
             width=258 * mm,
-            wrap_cols={"Campanha"},
+            wrap_cols={"Modelo da Campanha", "Campanha"},
         )
     )
 
@@ -157,8 +164,8 @@ def build_pdf(rows: list[CampaignMetric], start_date: date | None = None, end_da
     story.append(
         _data_table(
             daily_summary.tail(30),
-            ["Data", "Plataforma", "Investimento", "Conversões", "Cliques", "Impressões", "ROAS", "CTR (%)"],
-            money_cols={"Investimento"},
+            ["Data", "Plataforma", "Investimento", "Mensagens", "Custo por Mensagem", "Alcance", "Impressões", "Frequência", "Cliques", "CTR (%)"],
+            money_cols={"Investimento", "Custo por Mensagem"},
             percent_cols={"CTR (%)"},
             width=258 * mm,
         )
@@ -169,10 +176,11 @@ def build_pdf(rows: list[CampaignMetric], start_date: date | None = None, end_da
     story.append(
         _data_table(
             campaign_summary,
-            ["Plataforma", "Conta", "Campanha", "Impressões", "Cliques", "Investimento", "Conversões", "Custo/Conv.", "ROAS"],
-            money_cols={"Investimento", "Custo/Conv."},
+            ["Plataforma", "Conta", "Modelo da Campanha", "Campanha", "Alcance", "Impressões", "Frequência", "Cliques", "CTR (%)", "CPC", "Investimento", "Mensagens", "Custo por Mensagem"],
+            money_cols={"Investimento", "CPC", "Custo por Mensagem"},
+            percent_cols={"CTR (%)"},
             width=258 * mm,
-            wrap_cols={"Campanha"},
+            wrap_cols={"Modelo da Campanha", "Campanha"},
             max_rows=60,
         )
     )
@@ -192,27 +200,37 @@ def _aggregate(df: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
     grouped = df.groupby(group_cols, as_index=False).agg(
         {
             "Impressões": "sum",
+            "Alcance": "sum",
             "Cliques": "sum",
             "Investimento": "sum",
+            "Mensagens": "sum",
             "Conversões": "sum",
             "Valor de Conversão": "sum",
         }
     )
     grouped["CTR (%)"] = grouped.apply(lambda row: _safe_div(row["Cliques"], row["Impressões"]) * 100, axis=1)
+    grouped["Frequência"] = grouped.apply(lambda row: _safe_div(row["Impressões"], row["Alcance"]), axis=1)
     grouped["CPC"] = grouped.apply(lambda row: _safe_div(row["Investimento"], row["Cliques"]), axis=1)
+    grouped["Custo por Mensagem"] = grouped.apply(lambda row: _safe_div(row["Investimento"], row["Mensagens"]), axis=1)
     grouped["Custo/Conv."] = grouped.apply(lambda row: _safe_div(row["Investimento"], row["Conversões"]), axis=1)
     grouped["ROAS"] = grouped.apply(lambda row: _safe_div(row["Valor de Conversão"], row["Investimento"]), axis=1)
-    return grouped.round({"CTR (%)": 2, "CPC": 2, "Custo/Conv.": 2, "ROAS": 2, "Investimento": 2, "Valor de Conversão": 2, "Conversões": 2})
+    return grouped.round({"CTR (%)": 2, "Frequência": 2, "CPC": 2, "Custo por Mensagem": 2, "Custo/Conv.": 2, "ROAS": 2, "Investimento": 2, "Valor de Conversão": 2, "Mensagens": 2, "Conversões": 2})
 
 
 def _totals(df: pd.DataFrame) -> dict[str, float]:
     spend = float(df["Investimento"].sum())
     conversions = float(df["Conversões"].sum())
+    messages = float(df["Mensagens"].sum())
     value = float(df["Valor de Conversão"].sum())
     clicks = float(df["Cliques"].sum())
     impressions = float(df["Impressões"].sum())
+    reach = float(df["Alcance"].sum())
     return {
         "spend": spend,
+        "reach": reach,
+        "impressions": impressions,
+        "messages": messages,
+        "cost_per_message": _safe_div(spend, messages),
         "conversions": conversions,
         "value": value,
         "roas": _safe_div(value, spend),
@@ -226,15 +244,15 @@ def _pdf_header(styles: dict, period: str) -> list:
     title_table = Table(
         [
             [
-                Paragraph("RELATÓRIO PREMIUM DE TRÁFEGO PAGO", styles["HeaderKicker"]),
+                Paragraph("RELATÓRIO PREMIUM DE CAMPANHAS DE MENSAGENS", styles["HeaderKicker"]),
                 Paragraph(f"Período analisado<br/><b>{period}</b>", styles["HeaderMeta"]),
             ],
             [
-                Paragraph("Performance consolidada de mídia paga", styles["HeaderTitle"]),
+                Paragraph("Performance de campanhas para mensagens", styles["HeaderTitle"]),
                 Paragraph(f"Gerado em<br/><b>{datetime.now().strftime('%d/%m/%Y às %H:%M')}</b>", styles["HeaderMeta"]),
             ],
             [
-                Paragraph("Google Ads + Meta Ads | Dashboard executivo com métricas, eficiência e detalhamento por campanha.", styles["HeaderSubtitle"]),
+                Paragraph("Meta Ads e Google Ads | Alcance, impressões, cliques, mensagens iniciadas e custo por conversa.", styles["HeaderSubtitle"]),
                 "",
             ],
         ],
@@ -262,9 +280,9 @@ def _pdf_header(styles: dict, period: str) -> list:
 def _kpi_cards(totals: dict[str, float], styles: dict) -> Table:
     cards = [
         ("Investimento total", _money(totals["spend"]), "Aplicação consolidada no período"),
-        ("Conversões", _number(totals["conversions"]), "Volume total de resultados"),
-        ("ROAS médio", _ratio(totals["roas"]), "Retorno sobre investimento"),
-        ("CPA médio", _money(totals["cpa"]), "Custo médio por conversão"),
+        ("Mensagens", _number(totals["messages"]), "Conversas iniciadas pela campanha"),
+        ("Custo por mensagem", _money(totals["cost_per_message"]), "Eficiência principal para WhatsApp/Direct"),
+        ("CTR / CPC", f"{_percent(totals['ctr'])} | {_money(totals['cpc'])}", "Clique e custo médio por clique"),
     ]
     table = Table(
         [
@@ -300,11 +318,12 @@ def _kpi_cards(totals: dict[str, float], styles: dict) -> Table:
 
 def _executive_reading(df: pd.DataFrame, campaign_summary: pd.DataFrame, platform_summary: pd.DataFrame, styles: dict) -> list:
     totals = _totals(df)
-    best_platform = platform_summary.sort_values(by="ROAS", ascending=False).iloc[0]
+    best_platform = platform_summary.sort_values(by="Custo por Mensagem", ascending=True).iloc[0]
     top_campaign = campaign_summary.iloc[0]
     bullets = [
-        f"No período analisado, o investimento total foi de <b>{_money(totals['spend'])}</b>, com <b>{_number(totals['conversions'])}</b> conversões e ROAS médio de <b>{_ratio(totals['roas'])}</b>.",
-        f"A plataforma com melhor ROAS foi <b>{best_platform['Plataforma']}</b>, alcançando <b>{_ratio(float(best_platform['ROAS']))}</b> de retorno.",
+        f"No período analisado, o investimento total foi de <b>{_money(totals['spend'])}</b>, gerando <b>{_number(totals['messages'])}</b> mensagens iniciadas.",
+        f"O custo médio por mensagem ficou em <b>{_money(totals['cost_per_message'])}</b>, com alcance total de <b>{_integer(totals['reach'])}</b> pessoas, <b>{_integer(totals['impressions'])}</b> impressões e frequência média de <b>{_ratio(_safe_div(totals['impressions'], totals['reach']))}</b>.",
+        f"A plataforma mais eficiente em custo por mensagem foi <b>{best_platform['Plataforma']}</b>, com <b>{_money(float(best_platform['Custo por Mensagem']))}</b> por conversa iniciada.",
         f"A campanha com maior investimento foi <b>{_escape(str(top_campaign['Campanha']))}</b>, com <b>{_money(float(top_campaign['Investimento']))}</b> aplicados.",
         f"O CTR médio consolidado foi de <b>{_percent(totals['ctr'])}</b> e o CPC médio ficou em <b>{_money(totals['cpc'])}</b>.",
     ]
@@ -336,11 +355,11 @@ def _data_table(
                 text = _money(float(value))
             elif col in percent_cols:
                 text = _percent(float(value))
-            elif col in {"ROAS"}:
+            elif col in {"ROAS", "Frequência"}:
                 text = _ratio(float(value))
-            elif col in {"Impressões", "Cliques"}:
+            elif col in {"Alcance", "Impressões", "Cliques"}:
                 text = _integer(float(value))
-            elif col in {"Conversões"}:
+            elif col in {"Mensagens", "Conversões"}:
                 text = _number(float(value))
             else:
                 text = str(value)
@@ -367,7 +386,7 @@ def _data_table(
         )
     )
     for index, col in enumerate(columns):
-        if col not in {"Plataforma", "Conta", "Campanha", "Data"}:
+        if col not in {"Plataforma", "Conta", "Modelo da Campanha", "Campanha", "Data"}:
             table.setStyle(TableStyle([("ALIGN", (index, 1), (index, -1), "RIGHT")]))
     return table
 
@@ -378,9 +397,15 @@ def _column_widths(columns: list[str], width: float) -> list[float]:
         "Conta": 1.5,
         "Plataforma": 1.25,
         "Data": 1.1,
+        "Modelo da Campanha": 1.65,
         "Valor de Conversão": 1.7,
         "Investimento": 1.55,
+        "Custo por Mensagem": 1.7,
         "Custo/Conv.": 1.45,
+        "Mensagens": 1.2,
+        "Impressões": 1.25,
+        "Alcance": 1.2,
+        "Frequência": 1.2,
     }
     total = sum(weights.get(col, 1.15) for col in columns)
     return [width * (weights.get(col, 1.15) / total) for col in columns]
@@ -452,6 +477,21 @@ def _footer(canvas, document) -> None:
 
 def _platform_label(value: str) -> str:
     return "Google Ads" if value == "google" else "Meta Ads" if value == "meta" else value.title()
+
+
+def _objective_label(value: str) -> str:
+    normalized = (value or "").strip().upper()
+    if normalized in {"OUTCOME_ENGAGEMENT", "MESSAGES", "POST_ENGAGEMENT"}:
+        return "Engajamento para mensagens"
+    if normalized in {"OUTCOME_LEADS", "LEAD_GENERATION"}:
+        return "Geração de cadastros"
+    if normalized in {"OUTCOME_TRAFFIC", "LINK_CLICKS"}:
+        return "Tráfego"
+    if normalized in {"OUTCOME_SALES", "CONVERSIONS"}:
+        return "Vendas / conversões"
+    if normalized in {"OUTCOME_AWARENESS", "BRAND_AWARENESS", "REACH"}:
+        return "Reconhecimento / alcance"
+    return value.replace("_", " ").title() if value else "Não informado"
 
 
 def _period_label(start_date: date | None, end_date: date | None) -> str:

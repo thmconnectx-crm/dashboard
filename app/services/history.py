@@ -36,6 +36,7 @@ def upsert_campaigns(db: Session, platform: str, campaigns: list[ConnectorCampai
         row = row or Campaign(platform=platform, account_id=campaign.account_id, external_id=campaign.id)
         row.name = campaign.name
         row.status = campaign.status
+        row.objective = campaign.objective
         db.add(row)
     db.commit()
 
@@ -59,13 +60,17 @@ def upsert_metrics(db: Session, metrics: list[ConnectorMetric]) -> None:
             date=metric.date,
         )
         row.campaign_name = metric.campaign_name
+        row.campaign_objective = metric.campaign_objective or _campaign_objective(db, metric.platform, metric.account_id, metric.campaign_id)
         row.impressions = metric.impressions
+        row.reach = metric.reach
         row.clicks = metric.clicks
         row.spend = metric.spend
+        row.messages = metric.messages
         row.conversions = metric.conversions
         row.conversion_value = metric.conversion_value
         row.ctr = metric.ctr
         row.cpc = metric.cpc
+        row.cost_per_message = metric.cost_per_message
         row.cost_per_conversion = metric.cost_per_conversion
         row.roas = metric.roas
         db.add(row)
@@ -111,8 +116,10 @@ def aggregate_by_platform(db: Session, start_date: date, end_date: date) -> list
         db.query(
             CampaignMetric.platform,
             func.sum(CampaignMetric.impressions),
+            func.sum(CampaignMetric.reach),
             func.sum(CampaignMetric.clicks),
             func.sum(CampaignMetric.spend),
+            func.sum(CampaignMetric.messages),
             func.sum(CampaignMetric.conversions),
             func.sum(CampaignMetric.conversion_value),
         )
@@ -121,8 +128,8 @@ def aggregate_by_platform(db: Session, start_date: date, end_date: date) -> list
         .all()
     )
     return [
-        _computed_totals(platform, impressions or 0, clicks or 0, spend or 0, conversions or 0, value or 0)
-        for platform, impressions, clicks, spend, conversions, value in rows
+        _computed_totals(platform, impressions or 0, reach or 0, clicks or 0, spend or 0, messages or 0, conversions or 0, value or 0)
+        for platform, impressions, reach, clicks, spend, messages, conversions, value in rows
     ]
 
 
@@ -132,8 +139,10 @@ def aggregate_by_day(db: Session, start_date: date, end_date: date) -> list[dict
             CampaignMetric.date,
             CampaignMetric.platform,
             func.sum(CampaignMetric.impressions),
+            func.sum(CampaignMetric.reach),
             func.sum(CampaignMetric.clicks),
             func.sum(CampaignMetric.spend),
+            func.sum(CampaignMetric.messages),
             func.sum(CampaignMetric.conversions),
             func.sum(CampaignMetric.conversion_value),
         )
@@ -145,20 +154,37 @@ def aggregate_by_day(db: Session, start_date: date, end_date: date) -> list[dict
     return [
         {
             "date": row_date.isoformat(),
-            **_computed_totals(platform, impressions or 0, clicks or 0, spend or 0, conversions or 0, value or 0),
+            **_computed_totals(platform, impressions or 0, reach or 0, clicks or 0, spend or 0, messages or 0, conversions or 0, value or 0),
         }
-        for row_date, platform, impressions, clicks, spend, conversions, value in rows
+        for row_date, platform, impressions, reach, clicks, spend, messages, conversions, value in rows
     ]
 
 
-def _computed_totals(platform: str, impressions: int, clicks: int, spend: float, conversions: float, value: float) -> dict:
+def _computed_totals(platform: str, impressions: int, reach: int, clicks: int, spend: float, messages: float, conversions: float, value: float) -> dict:
     derived = compute_derived_metrics(impressions, clicks, spend, conversions, value)
+    cost_per_message = round(float(spend) / float(messages), 2) if messages else 0.0
     return {
         "platform": platform,
         "impressions": int(impressions),
+        "reach": int(reach),
         "clicks": int(clicks),
         "spend": round(float(spend), 2),
+        "messages": round(float(messages), 2),
+        "cost_per_message": cost_per_message,
         "conversions": round(float(conversions), 2),
         "conversion_value": round(float(value), 2),
         **derived,
     }
+
+
+def _campaign_objective(db: Session, platform: str, account_id: str, campaign_id: str) -> str:
+    campaign = (
+        db.query(Campaign)
+        .filter(
+            Campaign.platform == platform,
+            Campaign.account_id == account_id,
+            Campaign.external_id == campaign_id,
+        )
+        .one_or_none()
+    )
+    return campaign.objective if campaign else ""
