@@ -160,7 +160,21 @@ def build_pdf(
     story.append(Paragraph("Campanhas em destaque", styles["SectionTitle"]))
     story.append(_featured_campaigns_table(campaign_summary.head(12), styles))
 
-    document.build(story, onFirstPage=_footer, onLaterPages=_footer)
+    try:
+        document.build(story, onFirstPage=_footer, onLaterPages=_footer)
+    except Exception:
+        output = BytesIO()
+        fallback = SimpleDocTemplate(
+            output,
+            pagesize=landscape(A4),
+            rightMargin=18 * mm,
+            leftMargin=18 * mm,
+            topMargin=14 * mm,
+            bottomMargin=14 * mm,
+            title="Relatório de Campanhas de Mensagens",
+            author="Paid Traffic Dashboard",
+        )
+        fallback.build(_fallback_pdf_story(df, period, styles), onFirstPage=_footer, onLaterPages=_footer)
     return output.getvalue()
 
 
@@ -276,14 +290,7 @@ def _comparison_cards(df: pd.DataFrame, previous_df: pd.DataFrame, campaign_summ
     for label, value, old_value, new_value, formatter in cards:
         delta = _delta(new_value, old_value)
         previous_label = f"{formatter(old_value)} no período anterior" if old_value else "Sem período anterior"
-        cells.append(
-            [
-                Paragraph(label, styles["KpiLabel"]),
-                Paragraph(value, styles["KpiValueLarge"]),
-                Paragraph(delta, styles["KpiDelta"]),
-                Paragraph(previous_label, styles["KpiNote"]),
-            ]
-        )
+        cells.append(Paragraph(f"<b>{_escape(label)}</b><br/><font size='15'>{_escape(value)}</font><br/><font color='#35D092'><b>{_escape(delta)}</b></font><br/><font color='#5B6874'>{_escape(previous_label)}</font>", styles["KpiCard"]))
     table = Table([cells], colWidths=[64.5 * mm] * 4, rowHeights=[31 * mm], hAlign="LEFT")
     table.setStyle(
         TableStyle(
@@ -416,6 +423,33 @@ def _featured_campaigns_table(df: pd.DataFrame, styles: dict) -> Table:
         )
     )
     return table
+
+
+def _fallback_pdf_story(df: pd.DataFrame, period: str, styles: dict) -> list:
+    if df.empty:
+        return [
+            *_pdf_header(styles, period),
+            Paragraph("Nenhum dado encontrado para os filtros selecionados.", styles["Empty"]),
+        ]
+
+    campaign_summary = _aggregate(df, ["Plataforma", "Conta", "Modelo da Campanha", "Campanha"]).sort_values(by="Investimento", ascending=False)
+    totals = _totals(df)
+    story = [
+        *_pdf_header(styles, period),
+        _kpi_cards(totals, styles),
+        Spacer(1, 10),
+        Paragraph("Resumo consolidado dos resultados", styles["SectionTitle"]),
+        _actions_table(df, styles),
+        Spacer(1, 10),
+        Paragraph("Campanhas em destaque", styles["SectionTitle"]),
+        _featured_campaigns_table(campaign_summary.head(10), styles),
+        Spacer(1, 8),
+        Paragraph(
+            "Observação: o relatório usou a versão segura de exportação para preservar o download com todos os principais indicadores.",
+            styles["BodyMuted"],
+        ),
+    ]
+    return story
 
 
 def _plain_table(rows: list[list], widths: list[float], styles: dict) -> Table:
@@ -600,6 +634,7 @@ def _pdf_styles() -> dict:
     base.add(ParagraphStyle("KpiValueLarge", parent=base["Normal"], textColor=BRAND_DARK, fontSize=15.5, leading=18, fontName="Helvetica-Bold"))
     base.add(ParagraphStyle("KpiDelta", parent=base["Normal"], textColor=BRAND_GREEN, fontSize=9, leading=11, fontName="Helvetica-Bold"))
     base.add(ParagraphStyle("KpiNote", parent=base["Normal"], textColor=BRAND_MUTED, fontSize=7.2, leading=9))
+    base.add(ParagraphStyle("KpiCard", parent=base["Normal"], textColor=BRAND_DARK, fontSize=8, leading=10.8))
     base.add(ParagraphStyle("SmallLabel", parent=base["Normal"], textColor=BRAND_MUTED, fontSize=6.8, leading=8, fontName="Helvetica-Bold"))
     base.add(ParagraphStyle("SmallValue", parent=base["Normal"], textColor=BRAND_DARK, fontSize=9.4, leading=11, fontName="Helvetica-Bold"))
     base.add(ParagraphStyle("TableHeader", parent=base["Normal"], textColor=colors.white, fontSize=7.2, leading=8.5, fontName="Helvetica-Bold"))
