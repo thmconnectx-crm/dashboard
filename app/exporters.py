@@ -91,7 +91,12 @@ def build_excel(rows: list[CampaignMetric]) -> bytes:
     return output.getvalue()
 
 
-def build_pdf(rows: list[CampaignMetric], start_date: date | None = None, end_date: date | None = None) -> bytes:
+def build_pdf(
+    rows: list[CampaignMetric],
+    start_date: date | None = None,
+    end_date: date | None = None,
+    previous_rows: list[CampaignMetric] | None = None,
+) -> bytes:
     output = BytesIO()
     document = SimpleDocTemplate(
         output,
@@ -124,73 +129,36 @@ def build_pdf(rows: list[CampaignMetric], start_date: date | None = None, end_da
         document.build(story, onFirstPage=_footer, onLaterPages=_footer)
         return output.getvalue()
 
-    platform_summary = _aggregate(df, ["Plataforma"])
+    previous_df = rows_to_dataframe(previous_rows or [])
     campaign_summary = _aggregate(df, ["Plataforma", "Conta", "Modelo da Campanha", "Campanha"]).sort_values(by="Investimento", ascending=False)
     daily_summary = _aggregate(df, ["Data", "Plataforma"]).sort_values(by=["Data", "Plataforma"])
 
-    totals = _totals(df)
-    story.append(_kpi_cards(totals, styles))
-    story.append(Spacer(1, 10))
-    story.append(Paragraph("Leitura executiva", styles["SectionTitle"]))
-    story.extend(_executive_reading(df, campaign_summary, platform_summary, styles))
-    story.append(Spacer(1, 10))
+    story.append(_comparison_cards(df, previous_df, campaign_summary, styles))
+    story.append(Spacer(1, 8))
+    story.append(_campaign_overview(campaign_summary, styles))
+    story.append(Spacer(1, 8))
 
-    story.append(Paragraph("Resumo por plataforma", styles["SectionTitle"]))
-    story.append(
-        _data_table(
-            platform_summary,
-            ["Plataforma", "Investimento", "Mensagens", "Custo por Mensagem", "Alcance", "Impressões", "Frequência", "Cliques", "CTR (%)", "CPC"],
-            money_cols={"Investimento", "Custo por Mensagem", "CPC"},
-            percent_cols={"CTR (%)"},
-            width=258 * mm,
-        )
-    )
-    story.append(Spacer(1, 12))
+    left_col = [
+        Paragraph("Conversões e ações por tipo", styles["SectionTitle"]),
+        _actions_table(df, styles),
+        Spacer(1, 8),
+        Paragraph("Distribuição por campanha", styles["SectionTitle"]),
+        _mini_bar_table(campaign_summary.head(6), "Campanha", "Mensagens", "Custo por Mensagem", styles),
+    ]
+    right_col = [
+        Paragraph("Alcance e impressões", styles["SectionTitle"]),
+        _mini_bar_table(campaign_summary.head(6), "Campanha", "Alcance", "Impressões", styles),
+        Spacer(1, 8),
+        Paragraph("Evolução diária", styles["SectionTitle"]),
+        _mini_bar_table(daily_summary.tail(8), "Data", "Mensagens", "Cliques", styles),
+    ]
+    columns = Table([[left_col, right_col]], colWidths=[126 * mm, 126 * mm], hAlign="LEFT")
+    columns.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+    story.append(columns)
+    story.append(Spacer(1, 8))
 
-    story.append(Paragraph("Top campanhas por investimento", styles["SectionTitle"]))
-    story.append(
-        _data_table(
-            campaign_summary.head(12),
-            ["Plataforma", "Modelo da Campanha", "Campanha", "Investimento", "Mensagens", "Custo por Mensagem", "Alcance", "Frequência", "Cliques", "CTR (%)"],
-            money_cols={"Investimento", "Custo por Mensagem"},
-            percent_cols={"CTR (%)"},
-            width=258 * mm,
-            wrap_cols={"Modelo da Campanha", "Campanha"},
-        )
-    )
-
-    story.append(PageBreak())
-    story.append(Paragraph("Evolução diária por plataforma", styles["SectionTitle"]))
-    story.append(
-        _data_table(
-            daily_summary.tail(30),
-            ["Data", "Plataforma", "Investimento", "Mensagens", "Custo por Mensagem", "Alcance", "Impressões", "Frequência", "Cliques", "CTR (%)"],
-            money_cols={"Investimento", "Custo por Mensagem"},
-            percent_cols={"CTR (%)"},
-            width=258 * mm,
-        )
-    )
-    story.append(Spacer(1, 12))
-
-    story.append(Paragraph("Detalhamento consolidado por campanha", styles["SectionTitle"]))
-    story.append(
-        _data_table(
-            campaign_summary,
-            ["Plataforma", "Conta", "Modelo da Campanha", "Campanha", "Alcance", "Impressões", "Frequência", "Cliques", "CTR (%)", "CPC", "Investimento", "Mensagens", "Custo por Mensagem"],
-            money_cols={"Investimento", "CPC", "Custo por Mensagem"},
-            percent_cols={"CTR (%)"},
-            width=258 * mm,
-            wrap_cols={"Modelo da Campanha", "Campanha"},
-            max_rows=60,
-        )
-    )
-    if len(campaign_summary) > 60:
-        story.append(
-            Paragraph(
-                f"O relatório exibe as 60 principais campanhas por investimento. A exportação em Excel contém a base completa com {len(campaign_summary)} campanhas.",
-                styles["BodyMuted"],
-            )
-        )
+    story.append(Paragraph("Campanhas em destaque", styles["SectionTitle"]))
+    story.append(_featured_campaigns_table(campaign_summary.head(12), styles))
 
     document.build(story, onFirstPage=_footer, onLaterPages=_footer)
     return output.getvalue()
@@ -240,6 +208,24 @@ def _totals(df: pd.DataFrame) -> dict[str, float]:
     }
 
 
+def _totals_from_summary(df: pd.DataFrame) -> dict[str, float]:
+    spend = float(df["Investimento"].sum()) if "Investimento" in df else 0.0
+    messages = float(df["Mensagens"].sum()) if "Mensagens" in df else 0.0
+    clicks = float(df["Cliques"].sum()) if "Cliques" in df else 0.0
+    impressions = float(df["Impressões"].sum()) if "Impressões" in df else 0.0
+    reach = float(df["Alcance"].sum()) if "Alcance" in df else 0.0
+    return {
+        "spend": spend,
+        "messages": messages,
+        "reach": reach,
+        "impressions": impressions,
+        "clicks": clicks,
+        "cpc": _safe_div(spend, clicks),
+        "ctr": _safe_div(clicks, impressions) * 100,
+        "cost_per_message": _safe_div(spend, messages),
+    }
+
+
 def _pdf_header(styles: dict, period: str) -> list:
     title_table = Table(
         [
@@ -275,6 +261,184 @@ def _pdf_header(styles: dict, period: str) -> list:
         )
     )
     return [title_table, Spacer(1, 12)]
+
+
+def _comparison_cards(df: pd.DataFrame, previous_df: pd.DataFrame, campaign_summary: pd.DataFrame, styles: dict) -> Table:
+    current = _totals(df)
+    previous = _totals(previous_df) if not previous_df.empty else {}
+    cards = [
+        ("Valor investido", _money(current["spend"]), previous.get("spend", 0), current["spend"], _money),
+        ("Impressões", _integer(current["impressions"]), previous.get("impressions", 0), current["impressions"], _integer),
+        ("Cliques", _integer(current["clicks"]), previous.get("clicks", 0), current["clicks"], _integer),
+        ("Número de campanhas", _integer(len(campaign_summary)), len(_aggregate(previous_df, ["Campanha"])) if not previous_df.empty else 0, len(campaign_summary), _integer),
+    ]
+    cells = []
+    for label, value, old_value, new_value, formatter in cards:
+        delta = _delta(new_value, old_value)
+        previous_label = f"{formatter(old_value)} no período anterior" if old_value else "Sem período anterior"
+        cells.append(
+            [
+                Paragraph(label, styles["KpiLabel"]),
+                Paragraph(value, styles["KpiValueLarge"]),
+                Paragraph(delta, styles["KpiDelta"]),
+                Paragraph(previous_label, styles["KpiNote"]),
+            ]
+        )
+    table = Table([cells], colWidths=[64.5 * mm] * 4, rowHeights=[31 * mm], hAlign="LEFT")
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+                ("BOX", (0, 0), (-1, -1), 0.5, BRAND_LINE),
+                ("INNERGRID", (0, 0), (-1, -1), 0.35, BRAND_LINE),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 9),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+            ]
+        )
+    )
+    return table
+
+
+def _campaign_overview(campaign_summary: pd.DataFrame, styles: dict) -> Table:
+    totals = _totals_from_summary(campaign_summary)
+    campaign_names = "<br/>".join(_escape(name) for name in campaign_summary["Campanha"].head(4).tolist()) or "Campanhas selecionadas"
+    metrics = [
+        ("Alcance total", _integer(totals["reach"])),
+        ("Impressões totais", _integer(totals["impressions"])),
+        ("Total de cliques", _integer(totals["clicks"])),
+        ("Valor investido", _money(totals["spend"])),
+        ("CPC médio total", _money(totals["cpc"])),
+        ("CTR (todos)", _percent(totals["ctr"])),
+        ("CPM médio", _money(_safe_div(totals["spend"] * 1000, totals["impressions"]))),
+        ("Frequência", _ratio(_safe_div(totals["impressions"], totals["reach"]))),
+    ]
+    metric_cells = [
+        [Paragraph(label, styles["SmallLabel"]), Paragraph(value, styles["SmallValue"])]
+        for label, value in metrics
+    ]
+    metric_grid = Table(
+        [metric_cells[:4], metric_cells[4:]],
+        colWidths=[27 * mm] * 4,
+        rowHeights=[17 * mm, 17 * mm],
+    )
+    metric_grid.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), BRAND_SOFT),
+                ("INNERGRID", (0, 0), (-1, -1), 0.25, BRAND_LINE),
+                ("BOX", (0, 0), (-1, -1), 0.25, BRAND_LINE),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    table = Table(
+        [[Paragraph("Campanhas", styles["SectionTitle"]), Paragraph(campaign_names, styles["Body"]), metric_grid]],
+        colWidths=[31 * mm, 86 * mm, 136 * mm],
+        hAlign="LEFT",
+    )
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+                ("BOX", (0, 0), (-1, -1), 0.5, BRAND_LINE),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ]
+        )
+    )
+    return table
+
+
+def _actions_table(df: pd.DataFrame, styles: dict) -> Table:
+    totals = _totals(df)
+    rows = [
+        ["Tipo", "Total", "Custo por ação"],
+        ["Mensagens iniciadas", _number(totals["messages"]), _money(totals["cost_per_message"])],
+        ["Cliques nos links", _integer(totals["clicks"]), _money(totals["cpc"])],
+        ["Pessoas alcançadas", _integer(totals["reach"]), _money(_safe_div(totals["spend"], totals["reach"]))],
+        ["Impressões", _integer(totals["impressions"]), _money(_safe_div(totals["spend"] * 1000, totals["impressions"])) + " CPM"],
+    ]
+    return _plain_table(rows, [58 * mm, 32 * mm, 35 * mm], styles)
+
+
+def _mini_bar_table(df: pd.DataFrame, label_col: str, value_col: str, second_col: str, styles: dict) -> Table:
+    rows = [[label_col, value_col, second_col]]
+    for _, row in df.iterrows():
+        label = row[label_col].strftime("%d/%m") if label_col == "Data" and hasattr(row[label_col], "strftime") else str(row[label_col])
+        rows.append([_clip(label, 34), _format_metric(value_col, row[value_col]), _format_metric(second_col, row[second_col])])
+    if len(rows) == 1:
+        rows.append(["Sem dados", "-", "-"])
+    return _plain_table(rows, [58 * mm, 32 * mm, 35 * mm], styles)
+
+
+def _featured_campaigns_table(df: pd.DataFrame, styles: dict) -> Table:
+    rows = [["Campanha", "Custo por resultados", "Valor investido", "Alcance", "Impressões", "Cliques", "CPC", "CPM", "Frequência"]]
+    for _, row in df.iterrows():
+        cpm = _safe_div(float(row["Investimento"]) * 1000, float(row["Impressões"]))
+        rows.append(
+            [
+                Paragraph(_escape(_clip(str(row["Campanha"]), 38)), styles["TableCell"]),
+                Paragraph(f"{_money(float(row['Custo por Mensagem']))}<br/>Mensagem", styles["TableCellRight"]),
+                _money(float(row["Investimento"])),
+                _integer(float(row["Alcance"])),
+                _integer(float(row["Impressões"])),
+                _integer(float(row["Cliques"])),
+                _money(float(row["CPC"])),
+                _money(cpm),
+                _ratio(float(row["Frequência"])),
+            ]
+        )
+    table = Table(rows, colWidths=[50 * mm, 31 * mm, 28 * mm, 25 * mm, 25 * mm, 19 * mm, 18 * mm, 18 * mm, 22 * mm], repeatRows=1)
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), BRAND_PANEL),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 6.8),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, BRAND_SOFT]),
+                ("GRID", (0, 0), (-1, -1), 0.25, BRAND_LINE),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
+    return table
+
+
+def _plain_table(rows: list[list], widths: list[float], styles: dict) -> Table:
+    table = Table(rows, colWidths=widths, repeatRows=1)
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), BRAND_PANEL),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 7),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, BRAND_SOFT]),
+                ("GRID", (0, 0), (-1, -1), 0.25, BRAND_LINE),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
+    return table
 
 
 def _kpi_cards(totals: dict[str, float], styles: dict) -> Table:
@@ -433,9 +597,14 @@ def _pdf_styles() -> dict:
     base.add(ParagraphStyle("Empty", parent=base["Heading2"], textColor=BRAND_DARK, fontSize=15, leading=18, alignment=TA_CENTER, spaceAfter=8))
     base.add(ParagraphStyle("KpiLabel", parent=base["Normal"], textColor=BRAND_MUTED, fontSize=7.8, leading=9, fontName="Helvetica-Bold"))
     base.add(ParagraphStyle("KpiValue", parent=base["Normal"], textColor=BRAND_DARK, fontSize=13, leading=15, fontName="Helvetica-Bold"))
+    base.add(ParagraphStyle("KpiValueLarge", parent=base["Normal"], textColor=BRAND_DARK, fontSize=15.5, leading=18, fontName="Helvetica-Bold"))
+    base.add(ParagraphStyle("KpiDelta", parent=base["Normal"], textColor=BRAND_GREEN, fontSize=9, leading=11, fontName="Helvetica-Bold"))
     base.add(ParagraphStyle("KpiNote", parent=base["Normal"], textColor=BRAND_MUTED, fontSize=7.2, leading=9))
+    base.add(ParagraphStyle("SmallLabel", parent=base["Normal"], textColor=BRAND_MUTED, fontSize=6.8, leading=8, fontName="Helvetica-Bold"))
+    base.add(ParagraphStyle("SmallValue", parent=base["Normal"], textColor=BRAND_DARK, fontSize=9.4, leading=11, fontName="Helvetica-Bold"))
     base.add(ParagraphStyle("TableHeader", parent=base["Normal"], textColor=colors.white, fontSize=7.2, leading=8.5, fontName="Helvetica-Bold"))
     base.add(ParagraphStyle("TableCell", parent=base["Normal"], textColor=colors.HexColor("#1D2933"), fontSize=7.1, leading=8.5))
+    base.add(ParagraphStyle("TableCellRight", parent=base["Normal"], textColor=colors.HexColor("#1D2933"), fontSize=7.1, leading=8.5, alignment=TA_RIGHT))
     return base
 
 
@@ -477,6 +646,33 @@ def _footer(canvas, document) -> None:
 
 def _platform_label(value: str) -> str:
     return "Google Ads" if value == "google" else "Meta Ads" if value == "meta" else value.title()
+
+
+def _delta(current: float, previous: float) -> str:
+    if not previous:
+        return "Novo período"
+    change = ((float(current) - float(previous)) / abs(float(previous))) * 100
+    sign = "+" if change >= 0 else ""
+    return f"{sign}{change:.2f}%".replace(".", ",")
+
+
+def _format_metric(column: str, value: float) -> str:
+    if column in {"Investimento", "CPC", "Custo por Mensagem", "Custo/Conv."}:
+        return _money(float(value))
+    if column in {"CTR (%)"}:
+        return _percent(float(value))
+    if column in {"Frequência", "ROAS"}:
+        return _ratio(float(value))
+    if column in {"Alcance", "Impressões", "Cliques"}:
+        return _integer(float(value))
+    if column in {"Mensagens", "Conversões"}:
+        return _number(float(value))
+    return str(value)
+
+
+def _clip(value: str, max_length: int) -> str:
+    clean = " ".join(str(value).split())
+    return clean if len(clean) <= max_length else clean[: max_length - 1].rstrip() + "…"
 
 
 def _objective_label(value: str) -> str:

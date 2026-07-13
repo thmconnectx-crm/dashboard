@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
@@ -169,6 +169,19 @@ def export_report(
         [item for item in account_ids.split(",") if item] or None,
         [item for item in campaign_ids.split(",") if item] or None,
     )
+    previous_rows = []
+    if file_type == "pdf":
+        days = max((end_date - start_date).days + 1, 1)
+        previous_end = start_date - timedelta(days=1)
+        previous_start = previous_end - timedelta(days=days - 1)
+        previous_rows = query_metrics(
+            db,
+            previous_start,
+            previous_end,
+            [item for item in platforms.split(",") if item] or None,
+            [item for item in account_ids.split(",") if item] or None,
+            [item for item in campaign_ids.split(",") if item] or None,
+        )
     if file_type == "xlsx":
         content = build_excel(rows)
         return Response(
@@ -177,7 +190,7 @@ def export_report(
             headers={"Content-Disposition": 'attachment; filename="relatorio-trafego-pago.xlsx"'},
         )
     if file_type == "pdf":
-        content = build_pdf(rows, start_date=start_date, end_date=end_date)
+        content = build_pdf(rows, start_date=start_date, end_date=end_date, previous_rows=previous_rows)
         return Response(
             content,
             media_type="application/pdf",
