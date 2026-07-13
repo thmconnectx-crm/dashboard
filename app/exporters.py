@@ -159,36 +159,38 @@ def _build_premium_pdf_canvas(
     canvas.setAuthor("Relatório executivo de mídia paga")
 
     totals = _totals(df)
+    report_mode = _report_mode(campaign_summary)
+    display_summary = _display_campaign_summary(campaign_summary, report_mode)
+    focus_df = _focus_dataframe(df, report_mode)
+    focus_totals = _totals(focus_df) if not focus_df.empty else totals
     previous = _totals(previous_df) if not previous_df.empty else {}
+    previous_focus_df = _focus_dataframe(previous_df, report_mode) if not previous_df.empty else previous_df
+    previous_focus = _totals(previous_focus_df) if not previous_focus_df.empty else previous
+    focus_daily_summary = _aggregate(focus_df, ["Data", "Plataforma"]).sort_values(by=["Data", "Plataforma"]) if not focus_df.empty else daily_summary
     margin = 22
     content_width = page_width - (margin * 2)
 
     _draw_page_background(canvas, page_width, page_height)
-    _draw_canvas_header(canvas, margin, page_height - 92, content_width, 70, period)
+    _draw_canvas_header(canvas, margin, page_height - 92, content_width, 70, period, report_mode)
 
     card_y = page_height - 180
     card_gap = 10
     card_width = (content_width - card_gap * 3) / 4
-    cards = [
-        ("Valor investido", _money(totals["spend"]), _delta(totals["spend"], previous.get("spend", 0)), _previous_label(previous.get("spend", 0), _money)),
-        ("Conversas iniciadas", _number(totals["messages"]), _delta(totals["messages"], previous.get("messages", 0)), _previous_label(previous.get("messages", 0), _number)),
-        ("Cliques", _integer(totals["clicks"]), _delta(totals["clicks"], previous.get("clicks", 0)), _previous_label(previous.get("clicks", 0), _integer)),
-        ("Impressões", _integer(totals["impressions"]), _delta(totals["impressions"], previous.get("impressions", 0)), _previous_label(previous.get("impressions", 0), _integer)),
-    ]
+    cards = _report_cards(report_mode, totals, focus_totals, previous, previous_focus)
     for index, (label, value, delta, previous_label) in enumerate(cards):
         _draw_metric_card(canvas, margin + index * (card_width + card_gap), card_y, card_width, 68, label, value, delta, previous_label)
 
     overview_y = page_height - 266
-    _draw_campaign_overview(canvas, margin, overview_y, content_width, 76, campaign_summary, totals)
+    _draw_campaign_overview(canvas, margin, overview_y, content_width, 76, display_summary, totals, focus_totals, report_mode)
 
     middle_y = page_height - 406
     left_width = content_width * 0.47
     right_x = margin + left_width + 14
     right_width = content_width - left_width - 14
-    _draw_actions_panel(canvas, margin, middle_y, left_width, 122, totals)
-    _draw_daily_panel(canvas, right_x, middle_y, right_width, 122, daily_summary)
+    _draw_actions_panel(canvas, margin, middle_y, left_width, 122, totals, focus_totals, report_mode)
+    _draw_daily_panel(canvas, right_x, middle_y, right_width, 122, focus_daily_summary, report_mode)
 
-    _draw_featured_table(canvas, margin, 48, content_width, 142, campaign_summary.head(8))
+    _draw_featured_table(canvas, margin, 48, content_width, 142, display_summary.head(8), report_mode)
     _draw_canvas_footer(canvas, margin, page_width, period)
 
     canvas.showPage()
@@ -204,7 +206,7 @@ def _build_empty_premium_pdf(period: str) -> bytes:
     margin = 22
     content_width = page_width - (margin * 2)
     _draw_page_background(canvas, page_width, page_height)
-    _draw_canvas_header(canvas, margin, page_height - 92, content_width, 70, period)
+    _draw_canvas_header(canvas, margin, page_height - 92, content_width, 70, period, "messages")
     canvas.setFillColor(colors.white)
     canvas.roundRect(margin, page_height - 240, content_width, 110, 8, fill=1, stroke=0)
     canvas.setFillColor(BRAND_DARK)
@@ -219,6 +221,100 @@ def _build_empty_premium_pdf(period: str) -> bytes:
     return output.getvalue()
 
 
+def _report_mode(campaign_summary: pd.DataFrame) -> str:
+    if campaign_summary.empty:
+        return "messages"
+    awareness_rows = campaign_summary[
+        campaign_summary.apply(lambda row: _is_awareness_campaign(str(row.get("Modelo da Campanha", "")), str(row.get("Campanha", ""))), axis=1)
+    ]
+    return "awareness" if not awareness_rows.empty else "messages"
+
+
+def _display_campaign_summary(campaign_summary: pd.DataFrame, report_mode: str) -> pd.DataFrame:
+    if campaign_summary.empty:
+        return campaign_summary
+    if report_mode == "awareness":
+        filtered = campaign_summary[
+            campaign_summary.apply(lambda row: _is_awareness_campaign(str(row.get("Modelo da Campanha", "")), str(row.get("Campanha", ""))), axis=1)
+        ].copy()
+        filtered = filtered[~filtered["Campanha"].astype(str).map(_is_report_support_campaign)]
+        return filtered if not filtered.empty else campaign_summary.head(1)
+    filtered = campaign_summary[~campaign_summary["Campanha"].astype(str).map(_is_report_support_campaign)].copy()
+    return filtered if not filtered.empty else campaign_summary
+
+
+def _focus_dataframe(df: pd.DataFrame, report_mode: str) -> pd.DataFrame:
+    if df.empty:
+        return df
+    if report_mode == "awareness":
+        filtered = df[df.apply(lambda row: _is_awareness_campaign(str(row.get("Modelo da Campanha", "")), str(row.get("Campanha", ""))), axis=1)].copy()
+        filtered = filtered[~filtered["Campanha"].astype(str).map(_is_report_support_campaign)]
+        return filtered if not filtered.empty else df
+    return df[~df["Campanha"].astype(str).map(_is_report_support_campaign)].copy()
+
+
+def _is_awareness_campaign(model: str, campaign_name: str) -> bool:
+    model_text = _normalize_text(model)
+    name_text = _normalize_text(campaign_name)
+    return (
+        "reconhecimento" in model_text
+        or "alcance" in model_text
+        or "[rec]" in name_text
+        or ".rec" in name_text
+        or " rec " in f" {name_text} "
+    )
+
+
+def _is_report_support_campaign(campaign_name: str) -> bool:
+    name_text = _normalize_text(campaign_name)
+    return "copia" in name_text or "copy" in name_text
+
+
+def _normalize_text(value: str) -> str:
+    replacements = {
+        "á": "a",
+        "à": "a",
+        "â": "a",
+        "ã": "a",
+        "é": "e",
+        "ê": "e",
+        "í": "i",
+        "ó": "o",
+        "ô": "o",
+        "õ": "o",
+        "ú": "u",
+        "ç": "c",
+    }
+    text = str(value or "").strip().lower()
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    return text
+
+
+def _report_cards(
+    report_mode: str,
+    account_totals: dict[str, float],
+    focus_totals: dict[str, float],
+    previous: dict[str, float],
+    previous_focus: dict[str, float],
+) -> list[tuple[str, str, str, str]]:
+    if report_mode == "awareness":
+        frequency = _safe_div(focus_totals["impressions"], focus_totals["reach"])
+        previous_frequency = _safe_div(previous_focus.get("impressions", 0), previous_focus.get("reach", 0))
+        return [
+            ("Valor investido", _money(account_totals["spend"]), _delta(account_totals["spend"], previous.get("spend", 0)), _previous_label(previous.get("spend", 0), _money)),
+            ("Alcance", _integer(focus_totals["reach"]), _delta(focus_totals["reach"], previous_focus.get("reach", 0)), _previous_label(previous_focus.get("reach", 0), _integer)),
+            ("Impressões", _integer(focus_totals["impressions"]), _delta(focus_totals["impressions"], previous_focus.get("impressions", 0)), _previous_label(previous_focus.get("impressions", 0), _integer)),
+            ("Frequência", _ratio(frequency), _delta(frequency, previous_frequency), _previous_label(previous_frequency, _ratio)),
+        ]
+    return [
+        ("Valor investido", _money(account_totals["spend"]), _delta(account_totals["spend"], previous.get("spend", 0)), _previous_label(previous.get("spend", 0), _money)),
+        ("Conversas iniciadas", _number(focus_totals["messages"]), _delta(focus_totals["messages"], previous.get("messages", 0)), _previous_label(previous.get("messages", 0), _number)),
+        ("Cliques", _integer(focus_totals["clicks"]), _delta(focus_totals["clicks"], previous.get("clicks", 0)), _previous_label(previous.get("clicks", 0), _integer)),
+        ("Impressões", _integer(focus_totals["impressions"]), _delta(focus_totals["impressions"], previous.get("impressions", 0)), _previous_label(previous.get("impressions", 0), _integer)),
+    ]
+
+
 def _draw_page_background(canvas, page_width: float, page_height: float) -> None:
     canvas.setFillColor(colors.HexColor("#F3F6F8"))
     canvas.rect(0, 0, page_width, page_height, fill=1, stroke=0)
@@ -226,7 +322,7 @@ def _draw_page_background(canvas, page_width: float, page_height: float) -> None
     canvas.rect(0, 0, page_width, 26, fill=1, stroke=0)
 
 
-def _draw_canvas_header(canvas, x: float, y: float, width: float, height: float, period: str) -> None:
+def _draw_canvas_header(canvas, x: float, y: float, width: float, height: float, period: str, report_mode: str) -> None:
     canvas.setFillColor(BRAND_DARK)
     canvas.roundRect(x, y, width, height, 10, fill=1, stroke=0)
     canvas.setFillColor(BRAND_GREEN)
@@ -244,7 +340,9 @@ def _draw_canvas_header(canvas, x: float, y: float, width: float, height: float,
     canvas.setFillColor(colors.HexColor("#C9D4DD"))
     _draw_fitted_text(
         canvas,
-        "Meta Ads | Campanhas de engajamento, conversas iniciadas, cliques, alcance e investimento",
+        "Meta Ads | Alcance, impressões, frequência, CPM, cliques e investimento"
+        if report_mode == "awareness"
+        else "Meta Ads | Campanhas de engajamento, conversas iniciadas, cliques, alcance e investimento",
         x + 24,
         y + 19,
         width - 232,
@@ -280,7 +378,17 @@ def _draw_metric_card(canvas, x: float, y: float, width: float, height: float, l
     _draw_fitted_text(canvas, previous, x + 12, y + 8, width - 24, PDF_FONT_REGULAR, 7)
 
 
-def _draw_campaign_overview(canvas, x: float, y: float, width: float, height: float, campaign_summary: pd.DataFrame, totals: dict[str, float]) -> None:
+def _draw_campaign_overview(
+    canvas,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    campaign_summary: pd.DataFrame,
+    account_totals: dict[str, float],
+    focus_totals: dict[str, float],
+    report_mode: str,
+) -> None:
     canvas.setFillColor(colors.white)
     canvas.roundRect(x, y, width, height, 8, fill=1, stroke=0)
     canvas.setStrokeColor(colors.HexColor("#DDE5EC"))
@@ -292,18 +400,32 @@ def _draw_campaign_overview(canvas, x: float, y: float, width: float, height: fl
     canvas.setFillColor(colors.HexColor("#24313D"))
     for index, name in enumerate(campaign_summary["Campanha"].head(3).tolist()):
         _draw_fitted_text(canvas, str(name), x + 12, y + height - 38 - index * 14, 216, PDF_FONT_REGULAR, 8.6)
-    metrics = [
-        ("Alcance total", _integer(totals["reach"])),
-        ("Impressões totais", _integer(totals["impressions"])),
-        ("Total de cliques", _integer(totals["clicks"])),
-        ("Conversas", _number(totals["messages"])),
-        ("Valor investido", _money(totals["spend"])),
-        ("Custo/conv.", _money(totals["cost_per_message"])),
-        ("CPC médio", _money(totals["cpc"])),
-        ("CTR", _percent(totals["ctr"])),
-        ("CPM médio", _money(_safe_div(totals["spend"] * 1000, totals["impressions"]))),
-        ("Frequência", _ratio(_safe_div(totals["impressions"], totals["reach"]))),
-    ]
+    if report_mode == "awareness":
+        metrics = [
+            ("Invest. conta", _money(account_totals["spend"])),
+            ("Invest. objetivo", _money(focus_totals["spend"])),
+            ("Alcance total", _integer(focus_totals["reach"])),
+            ("Impressões", _integer(focus_totals["impressions"])),
+            ("Cliques", _integer(focus_totals["clicks"])),
+            ("CTR", _percent(focus_totals["ctr"])),
+            ("CPC médio", _money(focus_totals["cpc"])),
+            ("CPM médio", _money(_safe_div(focus_totals["spend"] * 1000, focus_totals["impressions"]))),
+            ("Frequência", _ratio(_safe_div(focus_totals["impressions"], focus_totals["reach"]))),
+            ("Conversas", _number(focus_totals["messages"])),
+        ]
+    else:
+        metrics = [
+            ("Invest. conta", _money(account_totals["spend"])),
+            ("Alcance total", _integer(focus_totals["reach"])),
+            ("Impressões", _integer(focus_totals["impressions"])),
+            ("Total de cliques", _integer(focus_totals["clicks"])),
+            ("Conversas", _number(focus_totals["messages"])),
+            ("Custo/conv.", _money(focus_totals["cost_per_message"])),
+            ("CPC médio", _money(focus_totals["cpc"])),
+            ("CTR", _percent(focus_totals["ctr"])),
+            ("CPM médio", _money(_safe_div(focus_totals["spend"] * 1000, focus_totals["impressions"]))),
+            ("Frequência", _ratio(_safe_div(focus_totals["impressions"], focus_totals["reach"]))),
+        ]
     grid_x = x + 238
     cell_w = (width - 252) / 5
     cell_h = 28
@@ -320,46 +442,72 @@ def _draw_campaign_overview(canvas, x: float, y: float, width: float, height: fl
         _draw_fitted_text(canvas, value, cx + 6, cy + 4, cell_w - 18, PDF_FONT_BOLD, 8.9)
 
 
-def _draw_actions_panel(canvas, x: float, y: float, width: float, height: float, totals: dict[str, float]) -> None:
+def _draw_actions_panel(
+    canvas,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    account_totals: dict[str, float],
+    focus_totals: dict[str, float],
+    report_mode: str,
+) -> None:
     canvas.setFillColor(colors.white)
     canvas.roundRect(x, y, width, height, 8, fill=1, stroke=0)
     canvas.setFillColor(BRAND_DARK)
     canvas.setFont(PDF_FONT_BOLD, 11.5)
-    canvas.drawString(x + 12, y + height - 18, "Conversões e ações por tipo")
-    rows = [
-        ("Conversas iniciadas", _number(totals["messages"]), _money(totals["cost_per_message"])),
-        ("Cliques nos links", _integer(totals["clicks"]), _money(totals["cpc"])),
-        ("Pessoas alcançadas", _integer(totals["reach"]), _money(_safe_div(totals["spend"], totals["reach"]))),
-        ("Impressões", _integer(totals["impressions"]), f"{_money(_safe_div(totals['spend'] * 1000, totals['impressions']))} CPM"),
-    ]
-    _draw_compact_table(canvas, x + 12, y + 16, width - 24, height - 44, ["Tipo", "Total", "Custo por ação"], rows, [0.52, 0.22, 0.26])
+    if report_mode == "awareness":
+        canvas.drawString(x + 12, y + height - 18, "Indicadores de reconhecimento")
+        rows = [
+            ("Investimento da conta", _money(account_totals["spend"]), "Total aplicado"),
+            ("Alcance", _integer(focus_totals["reach"]), _money(_safe_div(focus_totals["spend"], focus_totals["reach"]))),
+            ("Impressões", _integer(focus_totals["impressions"]), f"{_money(_safe_div(focus_totals['spend'] * 1000, focus_totals['impressions']))} CPM"),
+            ("Frequência", _ratio(_safe_div(focus_totals["impressions"], focus_totals["reach"])), "média por pessoa"),
+            ("Cliques", _integer(focus_totals["clicks"]), _money(focus_totals["cpc"])),
+        ]
+    else:
+        canvas.drawString(x + 12, y + height - 18, "Conversões e ações por tipo")
+        rows = [
+            ("Conversas iniciadas", _number(focus_totals["messages"]), _money(focus_totals["cost_per_message"])),
+            ("Cliques nos links", _integer(focus_totals["clicks"]), _money(focus_totals["cpc"])),
+            ("Pessoas alcançadas", _integer(focus_totals["reach"]), _money(_safe_div(focus_totals["spend"], focus_totals["reach"]))),
+            ("Impressões", _integer(focus_totals["impressions"]), f"{_money(_safe_div(focus_totals['spend'] * 1000, focus_totals['impressions']))} CPM"),
+        ]
+    header = ["Indicador", "Total", "Leitura"] if report_mode == "awareness" else ["Tipo", "Total", "Custo por ação"]
+    _draw_compact_table(canvas, x + 12, y + 16, width - 24, height - 44, header, rows, [0.52, 0.22, 0.26])
 
 
-def _draw_daily_panel(canvas, x: float, y: float, width: float, height: float, daily_summary: pd.DataFrame) -> None:
+def _draw_daily_panel(canvas, x: float, y: float, width: float, height: float, daily_summary: pd.DataFrame, report_mode: str) -> None:
     canvas.setFillColor(colors.white)
     canvas.roundRect(x, y, width, height, 8, fill=1, stroke=0)
     canvas.setFillColor(BRAND_DARK)
     canvas.setFont(PDF_FONT_BOLD, 11.5)
-    canvas.drawString(x + 12, y + height - 18, "Evolução diária de conversas e cliques")
+    canvas.drawString(
+        x + 12,
+        y + height - 18,
+        "Evolução diária de alcance e impressões" if report_mode == "awareness" else "Evolução diária de conversas e cliques",
+    )
     data = daily_summary.tail(8)
     if data.empty:
         canvas.setFillColor(BRAND_MUTED)
         canvas.setFont(PDF_FONT_REGULAR, 8.4)
         canvas.drawString(x + 12, y + height - 44, "Sem dados diários para o período.")
         return
-    max_value = max(float(data["Mensagens"].max()), float(data["Cliques"].max()), 1)
+    primary_col = "Alcance" if report_mode == "awareness" else "Mensagens"
+    secondary_col = "Impressões" if report_mode == "awareness" else "Cliques"
+    max_value = max(float(data[primary_col].max()), float(data[secondary_col].max()), 1)
     chart_x = x + 18
     chart_y = y + 30
     chart_w = width - 36
     group_w = chart_w / len(data)
     for index, (_, row) in enumerate(data.iterrows()):
         base_x = chart_x + index * group_w
-        messages_h = (float(row["Mensagens"]) / max_value) * 52
-        clicks_h = (float(row["Cliques"]) / max_value) * 52
+        primary_h = (float(row[primary_col]) / max_value) * 52
+        secondary_h = (float(row[secondary_col]) / max_value) * 52
         canvas.setFillColor(BRAND_GREEN)
-        canvas.roundRect(base_x + 7, chart_y, max(group_w * 0.28, 4), messages_h, 2, fill=1, stroke=0)
+        canvas.roundRect(base_x + 7, chart_y, max(group_w * 0.28, 4), primary_h, 2, fill=1, stroke=0)
         canvas.setFillColor(BRAND_CYAN)
-        canvas.roundRect(base_x + 7 + max(group_w * 0.32, 7), chart_y, max(group_w * 0.28, 4), clicks_h, 2, fill=1, stroke=0)
+        canvas.roundRect(base_x + 7 + max(group_w * 0.32, 7), chart_y, max(group_w * 0.28, 4), secondary_h, 2, fill=1, stroke=0)
         label = row["Data"].strftime("%d/%m") if hasattr(row["Data"], "strftime") else str(row["Data"])
         canvas.setFillColor(BRAND_MUTED)
         canvas.setFont(PDF_FONT_REGULAR, 6.8)
@@ -368,14 +516,14 @@ def _draw_daily_panel(canvas, x: float, y: float, width: float, height: float, d
     canvas.rect(x + width - 112, y + height - 24, 7, 7, fill=1, stroke=0)
     canvas.setFillColor(BRAND_MUTED)
     canvas.setFont(PDF_FONT_REGULAR, 7.4)
-    canvas.drawString(x + width - 101, y + height - 24, "Conversas")
+    canvas.drawString(x + width - 101, y + height - 24, "Alcance" if report_mode == "awareness" else "Conversas")
     canvas.setFillColor(BRAND_CYAN)
     canvas.rect(x + width - 51, y + height - 24, 7, 7, fill=1, stroke=0)
     canvas.setFillColor(BRAND_MUTED)
-    canvas.drawString(x + width - 40, y + height - 24, "Cliques")
+    canvas.drawString(x + width - 40, y + height - 24, "Impr." if report_mode == "awareness" else "Cliques")
 
 
-def _draw_featured_table(canvas, x: float, y: float, width: float, height: float, campaign_summary: pd.DataFrame) -> None:
+def _draw_featured_table(canvas, x: float, y: float, width: float, height: float, campaign_summary: pd.DataFrame, report_mode: str) -> None:
     canvas.setFillColor(colors.white)
     canvas.roundRect(x, y, width, height, 8, fill=1, stroke=0)
     canvas.setFillColor(BRAND_DARK)
@@ -384,20 +532,36 @@ def _draw_featured_table(canvas, x: float, y: float, width: float, height: float
     rows = []
     for _, row in campaign_summary.iterrows():
         cpm = _safe_div(float(row["Investimento"]) * 1000, float(row["Impressões"]))
-        rows.append(
-            (
-                str(row["Campanha"]),
-                str(row["Modelo da Campanha"]),
-                _money(float(row["Custo por Mensagem"])),
-                _money(float(row["Investimento"])),
-                _integer(float(row["Alcance"])),
-                _integer(float(row["Impressões"])),
-                _integer(float(row["Cliques"])),
-                _money(float(row["CPC"])),
-                _money(cpm),
-                _ratio(float(row["Frequência"])),
+        if report_mode == "awareness":
+            rows.append(
+                (
+                    str(row["Campanha"]),
+                    str(row["Modelo da Campanha"]),
+                    _money(float(row["Investimento"])),
+                    _integer(float(row["Alcance"])),
+                    _integer(float(row["Impressões"])),
+                    _integer(float(row["Cliques"])),
+                    _percent(float(row["CTR (%)"])),
+                    _money(float(row["CPC"])),
+                    _money(cpm),
+                    _ratio(float(row["Frequência"])),
+                )
             )
-        )
+        else:
+            rows.append(
+                (
+                    str(row["Campanha"]),
+                    str(row["Modelo da Campanha"]),
+                    _money(float(row["Custo por Mensagem"])),
+                    _money(float(row["Investimento"])),
+                    _integer(float(row["Alcance"])),
+                    _integer(float(row["Impressões"])),
+                    _integer(float(row["Cliques"])),
+                    _money(float(row["CPC"])),
+                    _money(cpm),
+                    _ratio(float(row["Frequência"])),
+                )
+            )
     if not rows:
         rows = [("Sem campanhas", "-", "-", "-", "-", "-", "-", "-", "-", "-")]
     _draw_compact_table(
@@ -406,9 +570,13 @@ def _draw_featured_table(canvas, x: float, y: float, width: float, height: float
         y + 14,
         width - 24,
         height - 42,
-        ["Campanha", "Modelo", "Custo/conv.", "Invest.", "Alcance", "Impressões", "Cliques", "CPC", "CPM", "Freq."],
+        ["Campanha", "Modelo", "Invest.", "Alcance", "Impressões", "Cliques", "CTR", "CPC", "CPM", "Freq."]
+        if report_mode == "awareness"
+        else ["Campanha", "Modelo", "Custo/conv.", "Invest.", "Alcance", "Impressões", "Cliques", "CPC", "CPM", "Freq."],
         rows,
-        [0.23, 0.16, 0.09, 0.095, 0.09, 0.095, 0.07, 0.07, 0.07, 0.05],
+        [0.24, 0.16, 0.095, 0.095, 0.10, 0.07, 0.065, 0.065, 0.065, 0.045]
+        if report_mode == "awareness"
+        else [0.23, 0.16, 0.09, 0.095, 0.09, 0.095, 0.07, 0.07, 0.07, 0.05],
         font_size=6.85,
     )
 
