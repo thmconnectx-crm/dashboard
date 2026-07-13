@@ -72,8 +72,8 @@ def build_excel(rows: list[CampaignMetric]) -> bytes:
             overview = pd.DataFrame(
                 [
                     {"Indicador": "Investimento total", "Valor": _money(float(df["Investimento"].sum()))},
-                    {"Indicador": "Mensagens iniciadas", "Valor": _number(float(df["Mensagens"].sum()))},
-                    {"Indicador": "Custo por mensagem", "Valor": _money(_safe_div(df["Investimento"].sum(), df["Mensagens"].sum()))},
+                    {"Indicador": "Conversas iniciadas", "Valor": _number(float(df["Mensagens"].sum()))},
+                    {"Indicador": "Custo por conversa", "Valor": _money(_safe_div(df["Investimento"].sum(), df["Mensagens"].sum()))},
                     {"Indicador": "Alcance", "Valor": _integer(float(df["Alcance"].sum()))},
                     {"Indicador": "Impressões", "Valor": _integer(float(df["Impressões"].sum()))},
                     {"Indicador": "Frequência", "Valor": _ratio(_safe_div(df["Impressões"].sum(), df["Alcance"].sum()))},
@@ -136,7 +136,7 @@ def _build_premium_pdf_canvas(
     card_width = (content_width - card_gap * 3) / 4
     cards = [
         ("Valor investido", _money(totals["spend"]), _delta(totals["spend"], previous.get("spend", 0)), _previous_label(previous.get("spend", 0), _money)),
-        ("Mensagens iniciadas", _number(totals["messages"]), _delta(totals["messages"], previous.get("messages", 0)), _previous_label(previous.get("messages", 0), _number)),
+        ("Conversas iniciadas", _number(totals["messages"]), _delta(totals["messages"], previous.get("messages", 0)), _previous_label(previous.get("messages", 0), _number)),
         ("Cliques", _integer(totals["clicks"]), _delta(totals["clicks"], previous.get("clicks", 0)), _previous_label(previous.get("clicks", 0), _integer)),
         ("Impressões", _integer(totals["impressions"]), _delta(totals["impressions"], previous.get("impressions", 0)), _previous_label(previous.get("impressions", 0), _integer)),
     ]
@@ -207,7 +207,7 @@ def _draw_canvas_header(canvas, x: float, y: float, width: float, height: float,
     canvas.drawString(x + 52, y + height - 47, "Análise de desempenho de campanhas")
     canvas.setFillColor(colors.HexColor("#C9D4DD"))
     canvas.setFont("Helvetica", 8.5)
-    canvas.drawString(x + 52, y + 14, "Meta Ads | Campanhas de engajamento para mensagens, cliques, alcance e investimento")
+    canvas.drawString(x + 52, y + 14, "Meta Ads | Campanhas de engajamento, conversas iniciadas, cliques, alcance e investimento")
     canvas.setFillColor(colors.HexColor("#19242E"))
     canvas.roundRect(x + width - 190, y + 17, 166, 36, 8, fill=1, stroke=0)
     canvas.setFillColor(colors.HexColor("#C9D4DD"))
@@ -252,9 +252,9 @@ def _draw_campaign_overview(canvas, x: float, y: float, width: float, height: fl
         ("Alcance total", _integer(totals["reach"])),
         ("Impressões totais", _integer(totals["impressions"])),
         ("Total de cliques", _integer(totals["clicks"])),
-        ("Mensagens", _number(totals["messages"])),
+        ("Conversas", _number(totals["messages"])),
         ("Valor investido", _money(totals["spend"])),
-        ("Custo/msg.", _money(totals["cost_per_message"])),
+        ("Custo/conv.", _money(totals["cost_per_message"])),
         ("CPC médio", _money(totals["cpc"])),
         ("CTR", _percent(totals["ctr"])),
         ("CPM médio", _money(_safe_div(totals["spend"] * 1000, totals["impressions"]))),
@@ -283,7 +283,7 @@ def _draw_actions_panel(canvas, x: float, y: float, width: float, height: float,
     canvas.setFont("Helvetica-Bold", 11)
     canvas.drawString(x + 12, y + height - 18, "Conversões e ações por tipo")
     rows = [
-        ("Mensagens iniciadas", _number(totals["messages"]), _money(totals["cost_per_message"])),
+        ("Conversas iniciadas", _number(totals["messages"]), _money(totals["cost_per_message"])),
         ("Cliques nos links", _integer(totals["clicks"]), _money(totals["cpc"])),
         ("Pessoas alcançadas", _integer(totals["reach"]), _money(_safe_div(totals["spend"], totals["reach"]))),
         ("Impressões", _integer(totals["impressions"]), f"{_money(_safe_div(totals['spend'] * 1000, totals['impressions']))} CPM"),
@@ -296,7 +296,7 @@ def _draw_daily_panel(canvas, x: float, y: float, width: float, height: float, d
     canvas.roundRect(x, y, width, height, 8, fill=1, stroke=0)
     canvas.setFillColor(BRAND_DARK)
     canvas.setFont("Helvetica-Bold", 11)
-    canvas.drawString(x + 12, y + height - 18, "Evolução diária de mensagens e cliques")
+    canvas.drawString(x + 12, y + height - 18, "Evolução diária de conversas e cliques")
     data = daily_summary.tail(8)
     if data.empty:
         canvas.setFillColor(BRAND_MUTED)
@@ -324,7 +324,7 @@ def _draw_daily_panel(canvas, x: float, y: float, width: float, height: float, d
     canvas.rect(x + width - 112, y + height - 24, 7, 7, fill=1, stroke=0)
     canvas.setFillColor(BRAND_MUTED)
     canvas.setFont("Helvetica", 7)
-    canvas.drawString(x + width - 101, y + height - 24, "Mensagens")
+    canvas.drawString(x + width - 101, y + height - 24, "Conversas")
     canvas.setFillColor(BRAND_CYAN)
     canvas.rect(x + width - 51, y + height - 24, 7, 7, fill=1, stroke=0)
     canvas.setFillColor(BRAND_MUTED)
@@ -362,7 +362,7 @@ def _draw_featured_table(canvas, x: float, y: float, width: float, height: float
         y + 14,
         width - 24,
         height - 42,
-        ["Campanha", "Modelo", "Custo/msg.", "Invest.", "Alcance", "Impressões", "Cliques", "CPC", "CPM", "Freq."],
+        ["Campanha", "Modelo", "Custo/conv.", "Invest.", "Alcance", "Impressões", "Cliques", "CPC", "CPM", "Freq."],
         rows,
         [0.22, 0.16, 0.095, 0.095, 0.09, 0.095, 0.075, 0.07, 0.07, 0.05],
         font_size=6.2,
@@ -516,7 +516,7 @@ def _pdf_header(styles: dict, period: str) -> list:
                 Paragraph(f"Gerado em<br/><b>{datetime.now().strftime('%d/%m/%Y às %H:%M')}</b>", styles["HeaderMeta"]),
             ],
             [
-                Paragraph("Meta Ads e Google Ads | Alcance, impressões, cliques, mensagens iniciadas e custo por conversa.", styles["HeaderSubtitle"]),
+                Paragraph("Meta Ads e Google Ads | Alcance, impressões, cliques, conversas iniciadas e custo por conversa.", styles["HeaderSubtitle"]),
                 "",
             ],
         ],
@@ -632,7 +632,7 @@ def _actions_table(df: pd.DataFrame, styles: dict) -> Table:
     totals = _totals(df)
     rows = [
         ["Tipo", "Total", "Custo por ação"],
-        ["Mensagens iniciadas", _number(totals["messages"]), _money(totals["cost_per_message"])],
+        ["Conversas iniciadas", _number(totals["messages"]), _money(totals["cost_per_message"])],
         ["Cliques nos links", _integer(totals["clicks"]), _money(totals["cpc"])],
         ["Pessoas alcançadas", _integer(totals["reach"]), _money(_safe_div(totals["spend"], totals["reach"]))],
         ["Impressões", _integer(totals["impressions"]), _money(_safe_div(totals["spend"] * 1000, totals["impressions"])) + " CPM"],
@@ -651,7 +651,7 @@ def _mini_bar_table(df: pd.DataFrame, label_col: str, value_col: str, second_col
 
 
 def _featured_campaigns_table(df: pd.DataFrame, styles: dict) -> Table:
-    rows = [["Campanha", "Modelo", "Custo por mensagem", "Valor investido", "Alcance", "Impressões", "Cliques", "CPC", "CPM", "Freq."]]
+    rows = [["Campanha", "Modelo", "Custo por conversa", "Valor investido", "Alcance", "Impressões", "Cliques", "CPC", "CPM", "Freq."]]
     for _, row in df.iterrows():
         cpm = _safe_div(float(row["Investimento"]) * 1000, float(row["Impressões"]))
         rows.append(
@@ -721,8 +721,8 @@ def _simple_kpi_table(totals: dict[str, float], styles: dict) -> Table:
     rows = [
         ["Indicador", "Resultado"],
         ["Investimento total", _money(totals["spend"])],
-        ["Mensagens iniciadas", _number(totals["messages"])],
-        ["Custo por mensagem", _money(totals["cost_per_message"])],
+        ["Conversas iniciadas", _number(totals["messages"])],
+        ["Custo por conversa", _money(totals["cost_per_message"])],
         ["Alcance", _integer(totals["reach"])],
         ["Impressões", _integer(totals["impressions"])],
         ["Cliques", _integer(totals.get("clicks", 0))],
@@ -783,8 +783,8 @@ def _plain_table(rows: list[list], widths: list[float], styles: dict) -> Table:
 def _kpi_cards(totals: dict[str, float], styles: dict) -> Table:
     cards = [
         ("Investimento total", _money(totals["spend"]), "Aplicação consolidada no período"),
-        ("Mensagens", _number(totals["messages"]), "Conversas iniciadas pela campanha"),
-        ("Custo por mensagem", _money(totals["cost_per_message"]), "Eficiência principal para WhatsApp/Direct"),
+        ("Conversas", _number(totals["messages"]), "Conversas iniciadas pela campanha"),
+        ("Custo por conversa", _money(totals["cost_per_message"]), "Eficiência principal para WhatsApp/Direct"),
         ("CTR / CPC", f"{_percent(totals['ctr'])} | {_money(totals['cpc'])}", "Clique e custo médio por clique"),
     ]
     table = Table(
@@ -824,7 +824,7 @@ def _executive_reading(df: pd.DataFrame, campaign_summary: pd.DataFrame, platfor
     best_platform = platform_summary.sort_values(by="Custo por Mensagem", ascending=True).iloc[0]
     top_campaign = campaign_summary.iloc[0]
     bullets = [
-        f"No período analisado, o investimento total foi de <b>{_money(totals['spend'])}</b>, gerando <b>{_number(totals['messages'])}</b> mensagens iniciadas.",
+        f"No período analisado, o investimento total foi de <b>{_money(totals['spend'])}</b>, gerando <b>{_number(totals['messages'])}</b> conversas iniciadas.",
         f"O custo médio por mensagem ficou em <b>{_money(totals['cost_per_message'])}</b>, com alcance total de <b>{_integer(totals['reach'])}</b> pessoas, <b>{_integer(totals['impressions'])}</b> impressões e frequência média de <b>{_ratio(_safe_div(totals['impressions'], totals['reach']))}</b>.",
         f"A plataforma mais eficiente em custo por mensagem foi <b>{best_platform['Plataforma']}</b>, com <b>{_money(float(best_platform['Custo por Mensagem']))}</b> por conversa iniciada.",
         f"A campanha com maior investimento foi <b>{_escape(str(top_campaign['Campanha']))}</b>, com <b>{_money(float(top_campaign['Investimento']))}</b> aplicados.",

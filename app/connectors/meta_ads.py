@@ -195,18 +195,14 @@ def _sum_actions(actions: list[dict]) -> float:
 def _sum_messages(actions: list[dict]) -> float:
     if not actions:
         return 0.0
-    message_types = {
+    conversation_started_types = {
         "onsite_conversion.messaging_conversation_started_7d",
-        "onsite_conversion.messaging_first_reply",
-        "onsite_conversion.messaging_user_depth_2_message_send",
-        "onsite_conversion.messaging_user_depth_3_message_send",
-        "onsite_conversion.messaging_user_subscribed",
         "messaging_conversation_started_7d",
     }
     total = 0.0
     for action in actions:
         action_type = action.get("action_type", "")
-        if action_type in message_types or "messaging_conversation" in action_type:
+        if action_type in conversation_started_types:
             total += float(action.get("value", 0) or 0)
     return round(total, 2)
 

@@ -187,8 +187,8 @@ function renderMetricTiles(summary) {
   const avgFrequency = frequency(totals.impressions, totals.reach);
   const tiles = [
     ["Investimento", money.format(totals.spend), "wallet-cards", "Total aplicado no período"],
-    ["Mensagens", number.format(totals.messages), "messages-square", "Conversas iniciadas"],
-    ["Custo/msg.", money.format(costPerMessage), "badge-dollar-sign", "Custo por mensagem"],
+    ["Conversas", number.format(totals.messages), "messages-square", "Conversas iniciadas"],
+    ["Custo/conv.", money.format(costPerMessage), "badge-dollar-sign", "Custo por conversa"],
     ["Alcance", number.format(totals.reach), "radar", "Pessoas alcançadas"],
     ["Impressões", number.format(totals.impressions), "eye", "Exibições totais"],
     ["Frequência", avgFrequency.toFixed(2), "repeat-2", "Média de impressões por pessoa"],
@@ -219,8 +219,8 @@ function renderSummaryLedger(summary) {
     .map(
       (row) =>
         `<div class="ledger-item ${row.platform === "meta" ? "meta" : ""}">
-          <span><i class="ledger-dot"></i>${platformLabel(row.platform)} | ${number.format(row.messages || 0)} mensagens</span>
-          <strong>${money.format(row.cost_per_message || 0)} por msg.</strong>
+          <span><i class="ledger-dot"></i>${platformLabel(row.platform)} | ${number.format(row.messages || 0)} conversas</span>
+          <strong>${money.format(row.cost_per_message || 0)} por conversa</strong>
         </div>`
     )
     .join("");
@@ -293,7 +293,7 @@ function renderCharts(summary, daily) {
           fill: true,
         },
         {
-          label: "Mensagens",
+          label: "Conversas",
           data: labels.map((day) => sumDaily(daily, day, "messages")),
           borderColor: "#e2a15b",
           backgroundColor: "rgba(226, 161, 91, 0.13)",
@@ -338,7 +338,7 @@ function renderCharts(summary, daily) {
           yAxisID: "money",
         },
         {
-          label: `${platformLabel(platform)} mensagens`,
+          label: `${platformLabel(platform)} conversas`,
           data: trendLabels.map((day) => sumDailyByPlatform(daily, day, platform, "messages")),
           borderColor: colors[platform]?.conversions || "#f0c18c",
           backgroundColor: "transparent",
@@ -396,7 +396,7 @@ function renderChartFallback(summary, daily) {
           </div>`;
         })
         .join("")}</div>`
-    : `<div class="fallback-empty">Sincronize dados para visualizar a evolução diária de cliques e mensagens.</div>`;
+    : `<div class="fallback-empty">Sincronize dados para visualizar a evolução diária de cliques e conversas.</div>`;
 
   ensureFallback(platformTrendCanvas, "platformTrendFallback").innerHTML = labels.length
     ? `<div class="fallback-bars">${labels
@@ -409,7 +409,7 @@ function renderChartFallback(summary, daily) {
           </div>`;
         })
         .join("")}</div>`
-    : `<div class="fallback-empty">Sincronize dados para visualizar investimento e mensagens por plataforma.</div>`;
+    : `<div class="fallback-empty">Sincronize dados para visualizar investimento e conversas por plataforma.</div>`;
 }
 
 function ensureFallback(canvas, id) {
