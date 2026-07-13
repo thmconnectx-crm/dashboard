@@ -10,7 +10,7 @@ from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.models import CampaignMetric
 
@@ -126,8 +126,11 @@ def build_pdf(
                 ),
             ]
         )
-        document.build(story, onFirstPage=_footer, onLaterPages=_footer)
-        return output.getvalue()
+        try:
+            document.build(story, onFirstPage=_footer, onLaterPages=_footer)
+            return output.getvalue()
+        except Exception:
+            return _emergency_pdf_bytes(period)
 
     previous_df = rows_to_dataframe(previous_rows or [])
     campaign_summary = _aggregate(df, ["Plataforma", "Conta", "Modelo da Campanha", "Campanha"]).sort_values(by="Investimento", ascending=False)
@@ -138,23 +141,17 @@ def build_pdf(
     story.append(_campaign_overview(campaign_summary, styles))
     story.append(Spacer(1, 8))
 
-    left_col = [
-        Paragraph("Conversões e ações por tipo", styles["SectionTitle"]),
-        _actions_table(df, styles),
-        Spacer(1, 8),
-        Paragraph("Distribuição por campanha", styles["SectionTitle"]),
-        _mini_bar_table(campaign_summary.head(6), "Campanha", "Mensagens", "Custo por Mensagem", styles),
-    ]
-    right_col = [
-        Paragraph("Alcance e impressões", styles["SectionTitle"]),
-        _mini_bar_table(campaign_summary.head(6), "Campanha", "Alcance", "Impressões", styles),
-        Spacer(1, 8),
-        Paragraph("Evolução diária", styles["SectionTitle"]),
-        _mini_bar_table(daily_summary.tail(8), "Data", "Mensagens", "Cliques", styles),
-    ]
-    columns = Table([[left_col, right_col]], colWidths=[126 * mm, 126 * mm], hAlign="LEFT")
-    columns.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
-    story.append(columns)
+    story.append(Paragraph("Conversões e ações por tipo", styles["SectionTitle"]))
+    story.append(_actions_table(df, styles))
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("Distribuição por campanha", styles["SectionTitle"]))
+    story.append(_mini_bar_table(campaign_summary.head(8), "Campanha", "Mensagens", "Custo por Mensagem", styles))
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("Alcance e impressões", styles["SectionTitle"]))
+    story.append(_mini_bar_table(campaign_summary.head(8), "Campanha", "Alcance", "Impressões", styles))
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("Evolução diária", styles["SectionTitle"]))
+    story.append(_mini_bar_table(daily_summary.tail(10), "Data", "Mensagens", "Cliques", styles))
     story.append(Spacer(1, 8))
 
     story.append(Paragraph("Campanhas em destaque", styles["SectionTitle"]))
@@ -174,7 +171,10 @@ def build_pdf(
             title="Relatório de Campanhas de Mensagens",
             author="Paid Traffic Dashboard",
         )
-        fallback.build(_fallback_pdf_story(df, period, styles), onFirstPage=_footer, onLaterPages=_footer)
+        try:
+            fallback.build(_fallback_pdf_story(df, period, styles), onFirstPage=_footer, onLaterPages=_footer)
+        except Exception:
+            return _emergency_pdf_bytes(period)
     return output.getvalue()
 
 
@@ -211,6 +211,7 @@ def _totals(df: pd.DataFrame) -> dict[str, float]:
         "spend": spend,
         "reach": reach,
         "impressions": impressions,
+        "clicks": clicks,
         "messages": messages,
         "cost_per_message": _safe_div(spend, messages),
         "conversions": conversions,
@@ -387,13 +388,14 @@ def _mini_bar_table(df: pd.DataFrame, label_col: str, value_col: str, second_col
 
 
 def _featured_campaigns_table(df: pd.DataFrame, styles: dict) -> Table:
-    rows = [["Campanha", "Custo por resultados", "Valor investido", "Alcance", "Impressões", "Cliques", "CPC", "CPM", "Frequência"]]
+    rows = [["Campanha", "Modelo", "Custo por mensagem", "Valor investido", "Alcance", "Impressões", "Cliques", "CPC", "CPM", "Freq."]]
     for _, row in df.iterrows():
         cpm = _safe_div(float(row["Investimento"]) * 1000, float(row["Impressões"]))
         rows.append(
             [
-                Paragraph(_escape(_clip(str(row["Campanha"]), 38)), styles["TableCell"]),
-                Paragraph(f"{_money(float(row['Custo por Mensagem']))}<br/>Mensagem", styles["TableCellRight"]),
+                _clip(str(row["Campanha"]), 34),
+                _clip(str(row.get("Modelo da Campanha", "Não informado")), 26),
+                _money(float(row["Custo por Mensagem"])),
                 _money(float(row["Investimento"])),
                 _integer(float(row["Alcance"])),
                 _integer(float(row["Impressões"])),
@@ -403,7 +405,7 @@ def _featured_campaigns_table(df: pd.DataFrame, styles: dict) -> Table:
                 _ratio(float(row["Frequência"])),
             ]
         )
-    table = Table(rows, colWidths=[50 * mm, 31 * mm, 28 * mm, 25 * mm, 25 * mm, 19 * mm, 18 * mm, 18 * mm, 22 * mm], repeatRows=1)
+    table = Table(rows, colWidths=[43 * mm, 34 * mm, 27 * mm, 25 * mm, 23 * mm, 24 * mm, 18 * mm, 17 * mm, 17 * mm, 15 * mm], repeatRows=1)
     table.setStyle(
         TableStyle(
             [
@@ -436,7 +438,7 @@ def _fallback_pdf_story(df: pd.DataFrame, period: str, styles: dict) -> list:
     totals = _totals(df)
     story = [
         *_pdf_header(styles, period),
-        _kpi_cards(totals, styles),
+        _simple_kpi_table(totals, styles),
         Spacer(1, 10),
         Paragraph("Resumo consolidado dos resultados", styles["SectionTitle"]),
         _actions_table(df, styles),
@@ -450,6 +452,46 @@ def _fallback_pdf_story(df: pd.DataFrame, period: str, styles: dict) -> list:
         ),
     ]
     return story
+
+
+def _simple_kpi_table(totals: dict[str, float], styles: dict) -> Table:
+    rows = [
+        ["Indicador", "Resultado"],
+        ["Investimento total", _money(totals["spend"])],
+        ["Mensagens iniciadas", _number(totals["messages"])],
+        ["Custo por mensagem", _money(totals["cost_per_message"])],
+        ["Alcance", _integer(totals["reach"])],
+        ["Impressões", _integer(totals["impressions"])],
+        ["Cliques", _integer(totals.get("clicks", 0))],
+        ["CTR", _percent(totals["ctr"])],
+        ["CPC", _money(totals["cpc"])],
+    ]
+    return _plain_table(rows, [78 * mm, 48 * mm], styles)
+
+
+def _emergency_pdf_bytes(period: str) -> bytes:
+    output = BytesIO()
+    styles = _pdf_styles()
+    document = SimpleDocTemplate(
+        output,
+        pagesize=landscape(A4),
+        rightMargin=18 * mm,
+        leftMargin=18 * mm,
+        topMargin=14 * mm,
+        bottomMargin=14 * mm,
+        title="Relatório de Campanhas",
+        author="Paid Traffic Dashboard",
+    )
+    story = [
+        *_pdf_header(styles, period),
+        Paragraph("Relatório gerado em modo seguro.", styles["SectionTitle"]),
+        Paragraph(
+            "Não foi possível montar a versão visual completa do PDF, mas o exportador foi preservado para evitar erro interno. Tente sincronizar novamente os dados e gerar o relatório mais uma vez.",
+            styles["BodyMuted"],
+        ),
+    ]
+    document.build(story, onFirstPage=_footer, onLaterPages=_footer)
+    return output.getvalue()
 
 
 def _plain_table(rows: list[list], widths: list[float], styles: dict) -> Table:
