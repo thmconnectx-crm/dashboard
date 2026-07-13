@@ -124,7 +124,7 @@ async function loadMetricTable() {
   const body = document.querySelector("#metricsTable");
   body.innerHTML = "";
   if (!payload.items.length) {
-    body.innerHTML = `<tr><td class="empty-row" colspan="11">Nenhum dado salvo para este filtro.</td></tr>`;
+    body.innerHTML = `<tr><td class="empty-row" colspan="11">Nenhum dado salvo para este filtro. Sincronize a conta ou ajuste o período selecionado.</td></tr>`;
     return;
   }
   for (const row of payload.items) {
@@ -156,13 +156,13 @@ async function loadSyncStatus() {
     status.classList.toggle("ok", payload.ok === true);
     status.classList.toggle("error", payload.ok === false);
     if (!payload.last_run_at) {
-      status.innerHTML = `<span>Ultima sincronizacao</span><strong>Nenhum registro ainda</strong>`;
+      status.innerHTML = `<span>Última sincronização</span><strong>Nenhum registro ainda</strong>`;
       return;
     }
-    const label = payload.ok ? "Concluida" : "Com erro";
-    status.innerHTML = `<span>Ultima sincronizacao</span><strong>${label} em ${formatDateTime(payload.last_run_at)}</strong>`;
+    const label = payload.ok ? "Concluída" : "Com erro";
+    status.innerHTML = `<span>Última sincronização</span><strong>${label} em ${formatDateTime(payload.last_run_at)}</strong>`;
   } catch {
-    status.innerHTML = `<span>Ultima sincronizacao</span><strong>Status indisponivel</strong>`;
+    status.innerHTML = `<span>Última sincronização</span><strong>Status indisponível</strong>`;
   }
 }
 
@@ -182,10 +182,10 @@ function renderMetricTiles(summary) {
   const cpa = totals.conversions ? totals.spend / totals.conversions : 0;
   const roas = totals.spend ? totals.value / totals.spend : 0;
   const tiles = [
-    ["Investimento", money.format(totals.spend), "wallet-cards", "Total aplicado no periodo"],
-    ["Cliques", number.format(totals.clicks), "mouse-pointer-click", "Volume de trafego capturado"],
-    ["CTR medio", `${ctr.toFixed(2)}%`, "activity", `${number.format(totals.impressions)} impressoes`],
-    ["CPA / ROAS", `${money.format(cpa)} / ${roas.toFixed(2)}`, "badge-dollar-sign", "Eficiencia de conversao"],
+    ["Investimento", money.format(totals.spend), "wallet-cards", "Total aplicado no período"],
+    ["Cliques", number.format(totals.clicks), "mouse-pointer-click", "Volume de tráfego capturado"],
+    ["CTR médio", `${ctr.toFixed(2)}%`, "activity", `${number.format(totals.impressions)} impressões`],
+    ["CPA / ROAS", `${money.format(cpa)} / ${roas.toFixed(2)}`, "badge-dollar-sign", "Eficiência de conversão"],
   ];
   document.querySelector("#metricGrid").innerHTML = tiles
     .map(
@@ -284,7 +284,7 @@ function renderCharts(summary, daily) {
           fill: true,
         },
         {
-          label: "Conversoes",
+          label: "Conversões",
           data: labels.map((day) => sumDaily(daily, day, "conversions")),
           borderColor: "#e2a15b",
           backgroundColor: "rgba(226, 161, 91, 0.13)",
@@ -329,7 +329,7 @@ function renderCharts(summary, daily) {
           yAxisID: "money",
         },
         {
-          label: `${platformLabel(platform)} conversoes`,
+          label: `${platformLabel(platform)} conversões`,
           data: trendLabels.map((day) => sumDailyByPlatform(daily, day, platform, "conversions")),
           borderColor: colors[platform]?.conversions || "#f0c18c",
           backgroundColor: "transparent",
@@ -387,7 +387,7 @@ function renderChartFallback(summary, daily) {
           </div>`;
         })
         .join("")}</div>`
-    : `<div class="fallback-empty">Sincronize dados para visualizar a evolucao diaria.</div>`;
+    : `<div class="fallback-empty">Sincronize dados para visualizar a evolução diária.</div>`;
 
   ensureFallback(platformTrendCanvas, "platformTrendFallback").innerHTML = labels.length
     ? `<div class="fallback-bars">${labels
@@ -400,7 +400,7 @@ function renderChartFallback(summary, daily) {
           </div>`;
         })
         .join("")}</div>`
-    : `<div class="fallback-empty">Sincronize dados para visualizar investimento e conversoes por plataforma.</div>`;
+    : `<div class="fallback-empty">Sincronize dados para visualizar investimento e conversões por plataforma.</div>`;
 }
 
 function ensureFallback(canvas, id) {
@@ -464,7 +464,7 @@ async function syncData() {
   const result = await response.json();
   const errors = result.items.filter((item) => item.error);
   if (errors.length) showToast(errors.map((item) => `${platformLabel(item.platform)}: ${item.error}`).join(" | "));
-  else showToast("Dados sincronizados.");
+  else showToast("Dados sincronizados com sucesso.");
   await Promise.all([loadAccounts(), loadCampaigns(), loadSyncStatus(), refreshDashboard()]);
 }
 
